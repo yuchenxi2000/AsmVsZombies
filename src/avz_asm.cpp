@@ -1,4 +1,8 @@
+#ifndef COMPILE_LOADER
 #include "libavz.h"
+#else
+#include "avz_asm.h"
+#endif
 
 void AAsm::GameFightLoop() {
     asm volatile(
@@ -583,6 +587,7 @@ void AAsm::MakeNewBoard() {
     AGetMainObject()->Scene() = scene;
 }
 
+#ifndef COMPILE_LOADER
 // 此函数是为了防止 LoadGame 过长的
 void __ABeforeMakeNewBoard(std::vector<int>& zombieMusicRefCnts, std::vector<int>& zombieMusicIdxs) {
     for (auto idx : zombieMusicIdxs) {
@@ -727,6 +732,7 @@ void AAsm::SaveGame(const std::string& file) {
         : ASaveAllRegister);
     FreePvzString(&pvzStr);
 }
+#endif
 
 bool AAsm::CanSpawnZombies(int row) {
     bool ret;

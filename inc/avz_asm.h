@@ -120,8 +120,10 @@ public:
     static void MakePvzString(const char* str, void* strObj);
     static void FreePvzString(void* strObj);
     static void MakeNewBoard();
+#ifndef COMPILE_LOADER
     static void LoadGame(const std::string& file);
     static void SaveGame(const std::string& file);
+#endif
 
     static bool CanSpawnZombies(int row);
     static bool IsNight();

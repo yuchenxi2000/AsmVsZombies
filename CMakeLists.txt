@@ -26,3 +26,43 @@ add_custom_target(PackageAvz ALL
         Compress-Archive -Path bin/,inc/,src/,metadata.json -Force -DestinationPath release/env2/nightly.zip"
     DEPENDS avz injector
 )
+
+# build mod loader
+add_library(avzloader SHARED src/avz_asm.cpp loader/avzloader.cpp)
+target_compile_definitions(avzloader PRIVATE COMPILE_LOADER)
+target_compile_options(avzloader PRIVATE -fexperimental-library)
+target_include_directories(avzloader PRIVATE inc)
+target_link_libraries(avzloader PRIVATE DbgHelp c++experimental)
+target_link_options(avzloader PRIVATE -static)
+set_target_properties(avzloader PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "avzloader"
+)
+
+# build mod installer
+add_executable(avzinstaller loader/avzinstaller.cpp)
+target_link_options(avzinstaller PRIVATE -static)
+
+# build example mod: lazy script
+add_library(lazy SHARED ${avz_srcs} ${minhook_srcs} mod/lazy.cpp)
+target_compile_definitions(lazy PRIVATE COMPILE_MOD)
+target_compile_options(lazy PRIVATE -fexperimental-library)
+target_include_directories(lazy PRIVATE inc)
+target_link_libraries(lazy PRIVATE DbgHelp c++experimental)
+target_link_options(lazy PRIVATE -static)
+set_target_properties(lazy PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "lazy"
+)
+
+# build example mod: auto-garden
+add_library(garden SHARED ${avz_srcs} ${minhook_srcs} mod/autogarden.cpp)
+target_compile_definitions(garden PRIVATE COMPILE_MOD)
+target_compile_options(garden PRIVATE -fexperimental-library)
+target_include_directories(garden PRIVATE inc)
+target_link_libraries(garden PRIVATE DbgHelp c++experimental)
+target_link_options(garden PRIVATE -static)
+set_target_properties(garden PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "garden"
+)

@@ -213,6 +213,39 @@ void __AScriptManager::ScriptHook() {
     }
 }
 
+#ifdef COMPILE_MOD
+int __AScriptManager::BeforeGameLoop() {
+    RunTotal();
+    if (!__aGameControllor.isUpdateWindow)
+        return 1;
+    return 0;
+}
+int __AScriptManager::AfterGameLoop() {
+    while (__aGameControllor.isSkipTick() && AGetPvzBase()->MainObject()) {
+        RunTotal();
+        if (__aGameControllor.isAdvancedPaused)
+            return 1;
+        if (AGameIsPaused()) // 防止游戏暂停时开启跳帧发生死锁
+            return 1;
+        if (blockDepth != 0 && ANowTime(blockTime.wave) == blockTime.time) {
+            // 阻塞时间到达，必须通知阻塞函数释放阻塞
+            return 1;
+        }
+        AGetPvzBase()->MjClock() += 1;
+        AAsm::GameFightLoop();
+        AAsm::ClearObjectMemory();
+        AAsm::CheckFightExit();
+    }
+    return 0;
+}
+extern "C" __declspec(dllexport) int __cdecl BeforeGameLoop() {
+    return __aScriptManager.BeforeGameLoop();
+}
+extern "C" __declspec(dllexport) int __cdecl AfterGameLoop() {
+    return __aScriptManager.AfterGameLoop();
+}
+#endif
+
 void __AScriptManager::WaitForFight(bool isSkipTick) {
     if (AGetPvzBase()->GameUi() == 3)
         return;

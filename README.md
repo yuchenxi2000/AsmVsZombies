@@ -37,6 +37,32 @@ AvZ 脚本库：[AvZScript](https://github.com/qrmd0/AvZScript)
 > * 对硬件配置 (CPU) 的要求低
 > * 对操作时间顺序不做严格要求
 
+## AvZ加载器
+
+> by yuchenxi2000
+
+`loader`目录下实现了类似Minecraft游戏的Fabric/Forge模组加载器，只需要把编译成动态库的AvZ脚本放在PvZ游戏所在目录的`mods`文件夹下，启动游戏时即可自动加载脚本。
+
+使用AvZLoader的好处：
+
+* 启动游戏自动加载
+
+* 可以同时加载多个脚本
+
+* 方便分享脚本/插件
+
+* 热插拔（TODO）
+
+使用方式：
+
+1. 编译完，把`bin`目录下的`avzloader.dll`和`avzinstaller.exe`拷贝到PvZ游戏所在目录下
+
+2. 运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`，这个就是安装了AvZLoader的版本
+
+3. 编译脚本时加上`COMPILE_MOD`宏定义。你可能需要从头编译，不能用链接`libavz.a`的方式，因为为了实现类似模组的功能，对AvZ源码进行了一些修改。具体可参考`mod`目录以及`CMakeLists.txt`中编译模组部分
+
+4. 在PvZ游戏所在目录新建一个`mods`文件夹，把编译好的动态库放在`mods`文件夹下，启动游戏
+
 ## 致谢
 
 * [yuchenxi2000/AssemblyVsZombies](https://github.com/yuchenxi2000/AssemblyVsZombies)
