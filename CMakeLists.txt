@@ -18,15 +18,6 @@ target_include_directories(avz PRIVATE inc)
 # build injector
 add_subdirectory(tools/injector)
 
-# 此条命令仅用于作者打包 avz，仅编译 avz 请注释这条命令
-add_custom_target(PackageAvz ALL
-    COMMAND powershell -c "\
-        cd ${PROJECT_SOURCE_DIR}; \
-        rm bin/*.dll; \
-        Compress-Archive -Path bin/,inc/,src/,metadata.json -Force -DestinationPath release/env2/nightly.zip"
-    DEPENDS avz injector
-)
-
 # build mod loader
 add_library(avzloader SHARED src/avz_asm.cpp loader/avzloader.cpp)
 target_compile_definitions(avzloader PRIVATE COMPILE_LOADER)
@@ -39,7 +30,7 @@ set_target_properties(avzloader PROPERTIES
     OUTPUT_NAME "avzloader"
 )
 
-# build mod installer
+# build mod loader installer
 add_executable(avzinstaller loader/avzinstaller.cpp)
 target_link_options(avzinstaller PRIVATE -static)
 
@@ -65,4 +56,13 @@ target_link_options(garden PRIVATE -static)
 set_target_properties(garden PROPERTIES
     PREFIX ""
     OUTPUT_NAME "garden"
+)
+
+# 此条命令仅用于作者打包 avz，仅编译 avz 请注释这条命令
+add_custom_target(PackageAvz ALL
+    COMMAND powershell -c "\
+        cd ${PROJECT_SOURCE_DIR}; \
+        rm bin/*.dll; \
+        Compress-Archive -Path bin/,inc/,src/,metadata.json -Force -DestinationPath release/env2/nightly.zip"
+    DEPENDS avz injector
 )

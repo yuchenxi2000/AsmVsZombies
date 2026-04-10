@@ -51,7 +51,11 @@ AvZ 脚本库：[AvZScript](https://github.com/qrmd0/AvZScript)
 
 * 方便分享脚本/插件
 
-* 热插拔（TODO）
+* 热加载。可以在游戏运行时加载/卸载脚本
+
+> 关于热加载：Windows不允许覆盖被加载的dll，因此卸载脚本只有两种方式：
+> 1. 重命名（必须改后缀，比如a.dll改成a.dll.disabled，不然会被重新加载回来）
+> 2. 移出mods目录
 
 使用方式：
 
