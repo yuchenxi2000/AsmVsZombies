@@ -1,0 +1,3 @@
+[submodule "loader/tomlplusplus"]
+	path = loader/tomlplusplus
+	url = https://github.com/marzer/tomlplusplus.git

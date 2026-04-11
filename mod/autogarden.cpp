@@ -540,7 +540,7 @@ void Garden() {
             // find corresponding plant
             for (int i = 0; i < plantSize; i++) {
                 auto & plant = plantArray[i];
-                if (plant.Type() != AHP_33 && plant.Row() == pot.Row() && plant.Col() == pot.Col() && garden_cooldown.GetCoolDown(pot.Row(), pot.Col()) == 0) {
+                if (plant.Type() != AHP_33 && plant.Row() == pot.Row() && plant.Col() == pot.Col() && !plant.IsSleeping() && garden_cooldown.GetCoolDown(pot.Row(), pot.Col()) == 0) {
                     // 坐标
                     int xi = plant.Abscissa() + plant.HurtWidth() / 2;
                     int yi = plant.Ordinate() + plant.HurtHeight() / 2;

@@ -22,7 +22,7 @@ add_subdirectory(tools/injector)
 add_library(avzloader SHARED src/avz_asm.cpp loader/avzloader.cpp)
 target_compile_definitions(avzloader PRIVATE COMPILE_LOADER)
 target_compile_options(avzloader PRIVATE -fexperimental-library)
-target_include_directories(avzloader PRIVATE inc)
+target_include_directories(avzloader PRIVATE inc loader/tomlplusplus/include)
 target_link_libraries(avzloader PRIVATE DbgHelp c++experimental)
 target_link_options(avzloader PRIVATE -static)
 set_target_properties(avzloader PROPERTIES
@@ -33,6 +33,13 @@ set_target_properties(avzloader PROPERTIES
 # build mod loader installer
 add_executable(avzinstaller loader/avzinstaller.cpp)
 target_link_options(avzinstaller PRIVATE -static)
+
+# build libavzmod
+add_library(avzmod ${avz_srcs} ${minhook_srcs})
+target_compile_definitions(avzmod PRIVATE COMPILE_MOD)
+target_compile_options(avzmod PRIVATE -fexperimental-library)
+target_link_libraries(avzmod PRIVATE DbgHelp c++experimental)
+target_include_directories(avzmod PRIVATE inc)
 
 # build example mod: lazy script
 add_library(lazy SHARED ${avz_srcs} ${minhook_srcs} mod/lazy.cpp)
@@ -55,7 +62,7 @@ target_link_libraries(garden PRIVATE DbgHelp c++experimental)
 target_link_options(garden PRIVATE -static)
 set_target_properties(garden PROPERTIES
     PREFIX ""
-    OUTPUT_NAME "garden"
+    OUTPUT_NAME "autogarden"
 )
 
 # 此条命令仅用于作者打包 avz，仅编译 avz 请注释这条命令

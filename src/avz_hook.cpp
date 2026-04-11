@@ -1,5 +1,16 @@
 #include "libavz.h"
 
+#ifdef COMPILE_MOD
+extern "C" __declspec(dllexport) void __cdecl ModInit(HMODULE hinstDLL) {
+    __aig.hInstance = hinstDLL;
+}
+extern "C" __declspec(dllexport) void __cdecl ModFinalize() {
+    __aScriptManager.willBeExit = true;
+    for (int i = 0; !__aScriptManager.isExit && i < 50; ++i) {
+        Sleep(20);
+    }
+}
+#else
 extern "C" __declspec(dllexport) void __cdecl __AScriptHook() {
     __aScriptManager.ScriptHook();
 }
@@ -17,16 +28,6 @@ void __AUninstallHook() {
     *(uint32_t*)0x667bc0 = 0x452650;
 }
 
-#ifdef COMPILE_MOD
-extern "C" __declspec(dllexport) void __cdecl Entry(HMODULE hinstDLL) {
-    __aig.hInstance = hinstDLL;
-}
-extern "C" __declspec(dllexport) void __cdecl AtExit() {
-    __aScriptManager.willBeExit = true;
-    for (int i = 0; !__aScriptManager.isExit && i < 50; ++i)
-        Sleep(20);
-}
-#else
 BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 
     switch (fdwReason) {

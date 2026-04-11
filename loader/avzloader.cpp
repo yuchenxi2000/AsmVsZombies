@@ -4,6 +4,33 @@
 #include <d3d.h>
 #include <avz_asm.h>
 #include <iostream>
+#include <toml++/toml.hpp>
+#include <algorithm>
+
+#ifdef DEBUG
+#include <io.h>
+#endif
+
+// user related stuff
+char * AGetUserName() {
+    return AMVal<char *>(0x6A9EC0, 0x82c, 0x4);
+}
+
+int AGetUserNameLen() {
+    return AMRef<int>(0x6A9EC0, 0x82c, 0x14);
+}
+
+int AGetUserNameLenMax() {
+    return AMRef<int>(0x6A9EC0, 0x82c, 0x18);
+}
+
+int AGetUserSwitchCnt() {
+    return AMRef<int>(0x6A9EC0, 0x82c, 0x1c);
+}
+
+int AGetUserIdx() {
+    return AMRef<int>(0x6A9EC0, 0x82c, 0x20);
+}
 
 std::wstring GetExeDir() {
     wchar_t path[MAX_PATH];
@@ -74,6 +101,102 @@ DWORD WINAPI MonitorThreadProc(LPVOID lpParam) {
     return 0;
 }
 
+class RunConf {
+public:
+    std::vector<std::string> users;
+    std::vector<int> levels;
+    bool exclude_user;
+    bool exclude_level;
+    RunConf() : exclude_user(true), exclude_level(true) {}
+    bool ShouldRun(const std::string & userName, int levelID) {
+        auto p1 = std::find(users.begin(), users.end(), userName);
+        if ((p1 == users.end()) ^ exclude_user) return false;
+        auto p2 = std::find(levels.begin(), levels.end(), levelID);
+        if ((p2 == levels.end()) ^ exclude_level) return false;
+        return true;
+    }
+};
+
+template <class T>
+void TomlGetValueOrList(toml::node_view<toml::node> node, std::vector<T> & dest_list) {
+    if (auto p = node.value<T>()) {
+        dest_list.push_back(*p);
+    } else if (auto p = node.as_array()) {
+        for (auto & el : *p) {
+            if (auto v = el.value<T>()) {
+                dest_list.push_back(*v);
+            }
+        }
+    }
+}
+
+class ModConf {
+public:
+    std::vector<RunConf> run_conf_list;
+    ModConf() {}
+    ModConf(std::wstring & conf_path) {
+#ifdef DEBUG
+        std::wcout << L"load config file " << conf_path << std::endl;
+#endif
+        // does file exist?
+        DWORD attr = GetFileAttributesW(conf_path.c_str());
+        if (attr == INVALID_FILE_ATTRIBUTES) {
+            return;
+        }
+#ifdef DEBUG
+        std::cout << "start parsing" << std::endl;
+#endif
+        // parse config file
+        toml::parse_result config = toml::parse_file(conf_path);
+        if (toml::array* arr = config["run"].as_array()) {
+            for (auto & tab : *arr) {
+                RunConf run_conf;
+                // user
+                run_conf.exclude_user = !tab.at_path("user.include");
+                TomlGetValueOrList(tab.at_path("user.include"), run_conf.users);
+                TomlGetValueOrList(tab.at_path("user.exclude"), run_conf.users);
+                // level
+                run_conf.exclude_level = !tab.at_path("level.include");
+                TomlGetValueOrList(tab.at_path("level.include"), run_conf.levels);
+                TomlGetValueOrList(tab.at_path("level.exclude"), run_conf.levels);
+                // add conf
+                run_conf_list.push_back(run_conf);
+            }
+        }
+#ifdef DEBUG
+        // debug
+        PrintConf();
+#endif
+    }
+    bool ShouldRun(const std::string & userName, int levelID) {
+        if (run_conf_list.empty()) {
+            return true;
+        }
+        for (auto & run_conf : run_conf_list) {
+            if (run_conf.ShouldRun(userName, levelID)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    void PrintConf() {
+        for (auto & run_conf : run_conf_list) {
+            std::cout << "user: exclude  = " << run_conf.exclude_user << std::endl;
+            std::cout << "      name arr =";
+            for (auto & name : run_conf.users) {
+                std::cout << " " << name;
+            }
+            std::cout << std::endl;
+            std::cout << "level: exclude   = " << run_conf.exclude_level << std::endl;
+            std::cout << "       level arr =";
+            for (auto & lvl : run_conf.levels) {
+                std::cout << " " << lvl;
+            }
+            std::cout << std::endl;
+        }
+    }
+};
+
 typedef void (__cdecl *FuncType)();
 typedef void (__cdecl *FuncEntryType)(HMODULE);
 typedef int (__cdecl *FuncLoopType)();
@@ -89,29 +212,39 @@ public:
     std::wstring modName;
     HMODULE hMod;
     FILETIME lastWriteTime;
-    FuncEntryType funcEntry;
-    FuncType funcAtExit;
+    bool enabled;
+    // mod conf
+    ModConf conf;
+    // exported funcs
+    FuncEntryType funcModInit;
+    FuncType funcModFinalize;
     FuncLoopType funcBeforeGameLoop;
     FuncLoopType funcAfterGameLoop;
     FuncType funcBeforeDrawEveryTick;
     FuncType funcDrawEveryTick;
     FuncType funcAfterDrawEveryTick;
-    Mod(const std::wstring & modName, HMODULE hMod, FILETIME lastWriteTime) : modName(modName), hMod(hMod), lastWriteTime(lastWriteTime) {
-        funcEntry = (FuncEntryType)GetProcAddress(hMod, "Entry");
-        funcAtExit = (FuncType)GetProcAddress(hMod, "AtExit");
+    void InitFuncs() {
+        funcModInit = (FuncEntryType)GetProcAddress(hMod, "ModInit");
+        funcModFinalize = (FuncType)GetProcAddress(hMod, "ModFinalize");
         funcBeforeGameLoop = (FuncLoopType)GetProcAddress(hMod, "BeforeGameLoop");
         funcAfterGameLoop = (FuncLoopType)GetProcAddress(hMod, "AfterGameLoop");
         funcBeforeDrawEveryTick = (FuncType)GetProcAddress(hMod, "BeforeDrawEveryTick");
         funcDrawEveryTick = (FuncType)GetProcAddress(hMod, "DrawEveryTick");
         funcAfterDrawEveryTick = (FuncType)GetProcAddress(hMod, "AfterDrawEveryTick");
     }
+    Mod(const std::wstring & modName, HMODULE hMod, FILETIME lastWriteTime) : modName(modName), hMod(hMod), lastWriteTime(lastWriteTime), enabled(true) {
+        InitFuncs();
+    }
+    Mod(const std::wstring & modName, HMODULE hMod, FILETIME lastWriteTime, std::wstring & conf_path) : modName(modName), hMod(hMod), lastWriteTime(lastWriteTime), enabled(true), conf(conf_path) {
+        InitFuncs();
+    }
     bool CheckFunc() {
         std::wstring message = L"Unloaded func in mod ";
         message += modName;
         message += L":";
         bool hasUnloadedFunc = false;
-        CHECK_FUNC(Entry)
-        CHECK_FUNC(AtExit)
+        CHECK_FUNC(ModInit)
+        CHECK_FUNC(ModFinalize)
         CHECK_FUNC(BeforeGameLoop)
         CHECK_FUNC(AfterGameLoop)
         CHECK_FUNC(BeforeDrawEveryTick)
@@ -122,6 +255,9 @@ public:
         }
         return !hasUnloadedFunc;
     }
+    void SwitchEnabled(const std::string & userName, int levelID) {
+        enabled = conf.ShouldRun(userName, levelID);
+    }
 };
 
 std::vector<Mod> mod_list;
@@ -129,6 +265,11 @@ std::vector<Mod> mod_list;
 void InstallDrawHook();
 void UninstallDrawHook();
 bool IsOpen3dAcceleration();
+
+std::wstring GetConfFileName(std::wstring & dllName) {
+    size_t pos = dllName.find_last_of(L".");
+    return dllName.substr(0, pos) + L".toml";
+}
 
 void LoadAllMods() {
     // load all mods
@@ -155,10 +296,13 @@ void LoadAllMods() {
                         // 1. 重命名（必须改后缀，比如a.dll改成a.dll.disabled，不然会被重新加载回来）
                         // 2. 移出mods目录
                         // 这块代码好像永远不会被执行，但以防万一就留着了
-                        mod.funcAtExit();
+                        mod.funcModFinalize();
                         FreeLibrary(mod.hMod);
                         // MessageBoxW(NULL, (std::wstring(L"Unload mod 1 ") + mod.modName).c_str(), L"OK", 0);
                     } else {
+                        // reload config
+                        std::wstring configFullPath = modDir + L"\\" + GetConfFileName(modName);
+                        mod.conf = ModConf(configFullPath);
                         new_mod_list.push_back(mod);
                         already_loaded = true;
                     }
@@ -169,9 +313,11 @@ void LoadAllMods() {
                 // load this mod
                 HMODULE hMod = LoadLibraryW(fullPath.c_str());
                 if (hMod) {
-                    Mod mod(modName, hMod, lastWriteTime);
+                    // find config file (DLL name without suffix + ".toml")
+                    std::wstring configFullPath = modDir + L"\\" + GetConfFileName(modName);
+                    Mod mod(modName, hMod, lastWriteTime, configFullPath);
                     if (mod.CheckFunc()) {
-                        mod.funcEntry(hMod);
+                        mod.funcModInit(hMod);
                         new_mod_list.push_back(mod);
                         // MessageBoxW(NULL, (std::wstring(L"Load mod ") + findData.cFileName).c_str(), L"OK", 0);
                     }
@@ -189,7 +335,7 @@ void LoadAllMods() {
                 }
             }
             if (!found) {
-                mod.funcAtExit();
+                mod.funcModFinalize();
                 FreeLibrary(mod.hMod);
                 // MessageBoxW(NULL, (std::wstring(L"Unload mod 2 ") + mod.modName).c_str(), L"OK", 0);
             }
@@ -204,7 +350,7 @@ HANDLE hThread = 0;
 
 bool hasDrawHook = false;
 bool mod_loaded = false;
-extern "C" __declspec(dllexport) void __cdecl __AScriptHook() {
+extern "C" void __cdecl __AScriptHook() {
     if (!mod_loaded) {
         // load mods
         LoadAllMods();
@@ -247,10 +393,24 @@ extern "C" __declspec(dllexport) void __cdecl __AScriptHook() {
             hasDrawHook = false;
         }
     }
+
+    // should the mod run on this level and this user?
+    std::string userName(AGetUserName(), AGetUserNameLen());
+    int levelID = AGetPvzBase()->LevelId();
+    int gameUi = AGetPvzBase()->GameUi();
+    if (gameUi == 3 || gameUi == 2) {
+        for (auto & mod : mod_list) {
+            mod.SwitchEnabled(userName, levelID);
+        }
+    }
+
+    // game loop
     bool should_ret = false;
     for (auto & mod : mod_list) {
-        if (mod.funcBeforeGameLoop()) {
-            should_ret = true;
+        if (mod.enabled) {
+            if (mod.funcBeforeGameLoop()) {
+                should_ret = true;
+            }
         }
     }
     if (should_ret) {
@@ -258,7 +418,9 @@ extern "C" __declspec(dllexport) void __cdecl __AScriptHook() {
     }
     AAsm::GameTotalLoop();
     for (auto & mod : mod_list) {
-        mod.funcAfterGameLoop();
+        if (mod.enabled) {
+            mod.funcAfterGameLoop();
+        }
     }
 }
 
@@ -371,12 +533,27 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         // return FALSE to fail DLL load
         // install hook
         __AInstallHook();
+#ifdef DEBUG
+        // 打开一个终端，显示std::cout结果
+        if (!::AttachConsole(ATTACH_PARENT_PROCESS)) {
+            if (::AllocConsole()) {
+                FILE* unused;
+                if (freopen_s(&unused, "CONOUT$", "w", stdout)) {
+                    _dup2(_fileno(stdout), 1);
+                }
+                if (freopen_s(&unused, "CONOUT$", "w", stderr)) {
+                    _dup2(_fileno(stdout), 2);
+                }
+                std::ios::sync_with_stdio();
+            }
+        }
+#endif
         break;
 
     case DLL_PROCESS_DETACH:
         // detach from process
         for (auto & mod : mod_list) {
-            mod.funcAtExit();
+            mod.funcModFinalize();
         }
         // uninstall hooks
         if (hasDrawHook) {

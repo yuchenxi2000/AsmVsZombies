@@ -43,15 +43,17 @@ AvZ 脚本库：[AvZScript](https://github.com/qrmd0/AvZScript)
 
 `loader`目录下实现了类似Minecraft游戏的Fabric/Forge模组加载器，只需要把编译成动态库的AvZ脚本放在PvZ游戏所在目录的`mods`文件夹下，启动游戏时即可自动加载脚本。
 
-使用AvZLoader的好处：
+AvZLoader能够：
 
 * 启动游戏自动加载
 
-* 可以同时加载多个脚本
+* 同时加载多个脚本
 
 * 方便分享脚本/插件
 
-* 热加载。可以在游戏运行时加载/卸载脚本
+* 热加载，可以在游戏运行时加载/卸载脚本
+
+* 限定脚本在指定用户、指定关卡运行，通过toml格式的配置文件
 
 > 关于热加载：Windows不允许覆盖被加载的dll，因此卸载脚本只有两种方式：
 > 1. 重命名（必须改后缀，比如a.dll改成a.dll.disabled，不然会被重新加载回来）
@@ -63,9 +65,41 @@ AvZ 脚本库：[AvZScript](https://github.com/qrmd0/AvZScript)
 
 2. 运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`，这个就是安装了AvZLoader的版本
 
-3. 编译脚本时加上`COMPILE_MOD`宏定义。你可能需要从头编译，不能用链接`libavz.a`的方式，因为为了实现类似模组的功能，对AvZ源码进行了一些修改。具体可参考`mod`目录以及`CMakeLists.txt`中编译模组部分
+3. 编译脚本时加上`COMPILE_MOD`宏定义。可以从头编译，具体可参考`mod`目录以及`CMakeLists.txt`中编译模组部分；也可以链接`libavzmod.a`（不能链接`libavz.a`，因为为了实现类似模组的功能，对AvZ源码进行了一些修改）
 
 4. 在PvZ游戏所在目录新建一个`mods`文件夹，把编译好的动态库放在`mods`文件夹下，启动游戏
+
+> AvZLoader和传统的通过`injector.exe`注入的脚本不能共存，你只能选择其中一个
+>
+> 由于AvZLoader采用加载器统一维护钩子、脚本不挂钩子的方式，所以存在AvZLoader时，用`injector.exe`注入脚本会导致`mods`文件夹下的脚本失效
+>
+> 解决办法就是链接`libavzmod.a`，然后把编译成的dll放到`mods`目录下，而不是用`injector.exe`注入
+> 
+> 参考编译指令：
+> ```powershell
+> clang++.exe -std=c++2b -shared -fexperimental-library -m32 -static -DCOMPILE_MOD -Iinc -Lbin -lc++experimental -lgdi32 -lDbgHelp '-Wl,--whole-archive' bin\libavzmod.a mod\autogarden.cpp '-Wl,--no-whole-archive' -o bin\autogarden.dll
+> ```
+>
+> -Wl,--whole-archive和-Wl,--no-whole-archive不可缺少，因为MinGW好像有奇怪的bug，一些标记了dllexport的函数无法导出
+
+脚本配置文件示例：（配置文件也支持热加载）
+```toml
+[[run]]
+[run.user]
+include = "Ycx"  # 限制只在用户名为Ycx的存档运行（PvZ用户名包括大小写！）
+# exclude = "233"  # 排除模式，注意你只能选择include或者exclude
+[run.level]
+include = 13  # 限制只在泳池无尽运行
+# exclude = [20, 24]  # 限制不在宝石迷阵系列关卡运行。这些选项都能用数组，包括上面的用户名也能用数组
+
+# 如果要对另一个用户名或者关卡配置，可以新写一个表
+[[run]]
+[run.user]
+include = "666"
+[run.level]
+include = 13
+```
+如果有一个脚本叫`script.dll`，那么对应的配置文件为`script.toml`，放到`mods`目录下。
 
 ## 致谢
 
