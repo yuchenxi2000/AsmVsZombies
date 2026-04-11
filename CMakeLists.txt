@@ -34,36 +34,20 @@ set_target_properties(avzloader PROPERTIES
 add_executable(avzinstaller loader/avzinstaller.cpp)
 target_link_options(avzinstaller PRIVATE -static)
 
-# build libavzmod
-add_library(avzmod ${avz_srcs} ${minhook_srcs})
-target_compile_definitions(avzmod PRIVATE COMPILE_MOD)
-target_compile_options(avzmod PRIVATE -fexperimental-library)
-target_link_libraries(avzmod PRIVATE DbgHelp c++experimental)
-target_include_directories(avzmod PRIVATE inc)
-
-# build example mod: lazy script
-add_library(lazy SHARED ${avz_srcs} ${minhook_srcs} mod/lazy.cpp)
-target_compile_definitions(lazy PRIVATE COMPILE_MOD)
-target_compile_options(lazy PRIVATE -fexperimental-library)
-target_include_directories(lazy PRIVATE inc)
-target_link_libraries(lazy PRIVATE DbgHelp c++experimental)
-target_link_options(lazy PRIVATE -static)
-set_target_properties(lazy PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "lazy"
-)
-
-# build example mod: auto-garden
-add_library(garden SHARED ${avz_srcs} ${minhook_srcs} mod/autogarden.cpp)
-target_compile_definitions(garden PRIVATE COMPILE_MOD)
-target_compile_options(garden PRIVATE -fexperimental-library)
-target_include_directories(garden PRIVATE inc)
-target_link_libraries(garden PRIVATE DbgHelp c++experimental)
-target_link_options(garden PRIVATE -static)
-set_target_properties(garden PROPERTIES
-    PREFIX ""
-    OUTPUT_NAME "autogarden"
-)
+# build example mods
+set(mod_srcs mod/lazy.cpp mod/autogarden.cpp mod/pe12.cpp)
+foreach(mod_src IN LISTS mod_srcs)
+    get_filename_component(mod_name ${mod_src} NAME_WE)
+    add_library(${mod_name} SHARED ${mod_src})
+    target_compile_options(${mod_name} PRIVATE -fexperimental-library)
+    target_include_directories(${mod_name} PRIVATE inc)
+    target_link_libraries(${mod_name} PRIVATE avz gdi32 dbghelp c++experimental)
+    target_link_options(${mod_name} PRIVATE -static)
+    set_target_properties(${mod_name} PROPERTIES
+        PREFIX ""
+        OUTPUT_NAME ${mod_name}
+    )
+endforeach()
 
 # 此条命令仅用于作者打包 avz，仅编译 avz 请注释这条命令
 add_custom_target(PackageAvz ALL

@@ -65,22 +65,19 @@ AvZLoader能够：
 
 2. 运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`，这个就是安装了AvZLoader的版本
 
-3. 编译脚本时加上`COMPILE_MOD`宏定义。可以从头编译，具体可参考`mod`目录以及`CMakeLists.txt`中编译模组部分；也可以链接`libavzmod.a`（不能链接`libavz.a`，因为为了实现类似模组的功能，对AvZ源码进行了一些修改）
+3. 编译脚本有两种方式：1、从头编译，具体可参考`CMakeLists.txt`中编译示例模组部分；2、链接`libavz.a`（必须是本仓库fork版本编译出的`libavz.a`）
 
 4. 在PvZ游戏所在目录新建一个`mods`文件夹，把编译好的动态库放在`mods`文件夹下，启动游戏
 
-> AvZLoader和传统的通过`injector.exe`注入的脚本不能共存，你只能选择其中一个
+> 注意第三条：dll是统一的，但目前只有两种选择
 >
-> 由于AvZLoader采用加载器统一维护钩子、脚本不挂钩子的方式，所以存在AvZLoader时，用`injector.exe`注入脚本会导致`mods`文件夹下的脚本失效
+> 1. 脚本编译成的dll作为模组放入mods文件夹，启动`PlantsVsZombies_modded.exe`
 >
-> 解决办法就是链接`libavzmod.a`，然后把编译成的dll放到`mods`目录下，而不是用`injector.exe`注入
-> 
-> 参考编译指令：
-> ```powershell
-> clang++.exe -std=c++2b -shared -fexperimental-library -m32 -static -DCOMPILE_MOD -Iinc -Lbin -lc++experimental -lgdi32 -lDbgHelp '-Wl,--whole-archive' bin\libavzmod.a mod\autogarden.cpp '-Wl,--no-whole-archive' -o bin\autogarden.dll
-> ```
+> 2. 启动`PlantsVsZombies.exe`，用`injector.exe`注入（目前只能注入`PlantsVsZombies.exe`，不能注入`PlantsVsZombies_modded.exe`）
 >
-> -Wl,--whole-archive和-Wl,--no-whole-archive不可缺少，因为MinGW好像有奇怪的bug，一些标记了dllexport的函数无法导出
+> 原因比较复杂。AvZLoader采用加载器统一维护钩子、脚本不挂钩子的方式。为了兼容`injector.exe`注入游戏方式，脚本如果检测到没有钩子存在，就会挂钩子。然而`PlantsVsZombies_modded.exe`加载的AvZLoader会先挂上钩子，导致注入的脚本发现钩子已经存在便不挂钩子，但AvZLoader又不知道脚本的存在。
+>
+> 接下来会写一个callback，在注入脚本时将其注册为mod（TODO）
 
 脚本配置文件示例：（配置文件也支持热加载）
 ```toml

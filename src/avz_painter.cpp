@@ -225,16 +225,18 @@ void __ABasicPainter::DrawEveryTick() {
     __isInPaintTickRunner = false;
 }
 
+extern bool IamMod;
+
 void __ABasicPainter::_BeforeScript() {
     if (!IsOpen3dAcceleration())
         return;
-#ifndef COMPILE_MOD
-    // InstallDrawHook
-    *(uint16_t*)0x54C8CD = 0x5890;
-    *(uint32_t*)0x667D0C = (uint32_t)&AsmDraw;
-    *(uint32_t*)0x671578 = (uint32_t)&AsmDraw;
-    *(uint32_t*)0x676968 = (uint32_t)&AsmDraw;
-#endif
+    if (!IamMod) {
+        // InstallDrawHook
+        *(uint16_t*)0x54C8CD = 0x5890;
+        *(uint32_t*)0x667D0C = (uint32_t)&AsmDraw;
+        *(uint32_t*)0x671578 = (uint32_t)&AsmDraw;
+        *(uint32_t*)0x676968 = (uint32_t)&AsmDraw;
+    }
     static ATickRunner _tickRunner;
     if (!_tickRunner.IsStopped()) {
         return;
@@ -253,13 +255,13 @@ void __ABasicPainter::_ExitFight() {
     ClearFont();
     singleTickQueue.clear();
     multiTickQueue.clear();
-#ifndef COMPILE_MOD
-    // UninstallDrawHook
-    *(uint16_t*)0x54C8CD = 0xD0FF;
-    *(uint32_t*)0x667D0C = 0x54C650;
-    *(uint32_t*)0x671578 = 0x54C650;
-    *(uint32_t*)0x676968 = 0x54C650;
-#endif
+    if (!IamMod) {
+        // UninstallDrawHook
+        *(uint16_t*)0x54C8CD = 0xD0FF;
+        *(uint32_t*)0x667D0C = 0x54C650;
+        *(uint32_t*)0x671578 = 0x54C650;
+        *(uint32_t*)0x676968 = 0x54C650;
+    }
 }
 
 void __ABasicPainter::_AfterInject() {
@@ -286,11 +288,12 @@ void __ABasicPainter::_AfterInject() {
         ATickRunner::AFTER_INJECT);
 }
 
-#ifdef COMPILE_MOD
-static double lastCallTime = 0.0;
-static double lastFinishTime = 0.0;
+namespace avzmod {
+    static double lastCallTime = 0.0;
+    static double lastFinishTime = 0.0;
+};
 extern "C" __declspec(dllexport) void __cdecl BeforeDrawEveryTick() {
-    lastCallTime = __AProfiler::CurrentTime();
+    avzmod::lastCallTime = __AProfiler::CurrentTime();
 
     if (!__ABasicPainter::IsOpen3dAcceleration()) return;
 
@@ -303,10 +306,10 @@ extern "C" __declspec(dllexport) void __cdecl DrawEveryTick() {
     __ABasicPainter::DrawEveryTick();
 }
 extern "C" __declspec(dllexport) void __cdecl AfterDrawEveryTick() {
-    lastFinishTime = __AProfiler::CurrentTime();
-    __aProfiler.paintTime.push_back(lastFinishTime - lastCallTime);
+    avzmod::lastFinishTime = __AProfiler::CurrentTime();
+    __aProfiler.paintTime.push_back(avzmod::lastFinishTime - avzmod::lastCallTime);
 }
-#else
+
 bool __ABasicPainter::AsmDraw() {
     static double lastCallTime, lastFinishTime;
     lastCallTime = __AProfiler::CurrentTime();
@@ -350,7 +353,6 @@ bool __ABasicPainter::AsmDraw() {
     __aProfiler.paintTime.push_back(lastFinishTime - lastCallTime);
     return ret;
 }
-#endif
 
 void __ABasicPainter::DrawRect(int x, int y, int w, int h, DWORD color, float layer) {
     __AGeoVertex aVertex[4] = {

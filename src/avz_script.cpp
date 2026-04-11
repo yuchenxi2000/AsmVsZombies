@@ -213,7 +213,6 @@ void __AScriptManager::ScriptHook() {
     }
 }
 
-#ifdef COMPILE_MOD
 int __AScriptManager::BeforeGameLoop() {
     RunTotal();
     if (!__aGameControllor.isUpdateWindow)
@@ -244,7 +243,6 @@ extern "C" __declspec(dllexport) int __cdecl BeforeGameLoop() {
 extern "C" __declspec(dllexport) int __cdecl AfterGameLoop() {
     return __aScriptManager.AfterGameLoop();
 }
-#endif
 
 void __AScriptManager::WaitForFight(bool isSkipTick) {
     if (AGetPvzBase()->GameUi() == 3)

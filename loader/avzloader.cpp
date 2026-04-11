@@ -563,7 +563,7 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         __AUninstallHook();
         // stop thread
         SetEvent(hStopEvent);
-        WaitForSingleObject(hThread, 1000);
+        WaitForSingleObject(hThread, 100);
         if (hStopEvent != INVALID_HANDLE_VALUE) {
             CloseHandle(hStopEvent);
         }

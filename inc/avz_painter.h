@@ -132,9 +132,7 @@ public:
     }
 
     // Hook
-#ifndef COMPILE_MOD
     static bool AsmDraw();
-#endif
     static void DrawEveryTick();
     static void UpdatePaintTime(); 
 
