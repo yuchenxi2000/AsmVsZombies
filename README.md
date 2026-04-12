@@ -55,29 +55,19 @@ AvZLoader能够：
 
 * 限定脚本在指定用户、指定关卡运行，通过toml格式的配置文件
 
-> 关于热加载：Windows不允许覆盖被加载的dll，因此卸载脚本只有两种方式：
+> 关于热加载：Windows不允许覆盖被加载的dll，因此卸载`mods`目录下的脚本只有两种方式：
 > 1. 重命名（必须改后缀，比如a.dll改成a.dll.disabled，不然会被重新加载回来）
 > 2. 移出mods目录
 
 使用方式：
 
-1. 编译完，把`bin`目录下的`avzloader.dll`和`avzinstaller.exe`拷贝到PvZ游戏所在目录下
+1. 下载release里的版本[2.9.0_loader](https://github.com/yuchenxi2000/AsmVsZombies/releases)
 
-2. 运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`，这个就是安装了AvZLoader的版本
+2. 安装AvZLoader：把`bin`目录下的`avzloader.dll`和`avzinstaller.exe`拷贝到PvZ游戏所在目录下（要有`PlantsVsZombies.exe`），运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`
 
-3. 编译脚本有两种方式：1、从头编译，具体可参考`CMakeLists.txt`中编译示例模组部分；2、链接`libavz.a`（必须是本仓库fork版本编译出的`libavz.a`）
+3. 打开`PlantsVsZombies_modded.exe`。运行脚本有两种方式：1、在PvZ游戏所在目录新建一个`mods`文件夹，把dll放在`mods`文件夹下（要改名字，因为不能加载同名的dll）；2、同时你可以用`injector.exe`注入（比如用VS Code的AvZ插件），但注入的mod只能用`injector.exe`卸载。
 
-4. 在PvZ游戏所在目录新建一个`mods`文件夹，把编译好的动态库放在`mods`文件夹下，启动游戏
-
-> 注意第三条：dll是统一的，但目前只有两种选择
->
-> 1. 脚本编译成的dll作为模组放入mods文件夹，启动`PlantsVsZombies_modded.exe`
->
-> 2. 启动`PlantsVsZombies.exe`，用`injector.exe`注入（目前只能注入`PlantsVsZombies.exe`，不能注入`PlantsVsZombies_modded.exe`）
->
-> 原因比较复杂。AvZLoader采用加载器统一维护钩子、脚本不挂钩子的方式。为了兼容`injector.exe`注入游戏方式，脚本如果检测到没有钩子存在，就会挂钩子。然而`PlantsVsZombies_modded.exe`加载的AvZLoader会先挂上钩子，导致注入的脚本发现钩子已经存在便不挂钩子，但AvZLoader又不知道脚本的存在。
->
-> 接下来会写一个callback，在注入脚本时将其注册为mod（TODO）
+4. release里的`bin`目录下有几个示例mod，可以直接放`mods`目录里面。如果要用`pe12.dll`，最好把`pe12.toml`（在`mod`目录下）也拷贝到`mods`目录，它能限制脚本只在生存无尽运行。
 
 脚本配置文件示例：（配置文件也支持热加载）
 ```toml
