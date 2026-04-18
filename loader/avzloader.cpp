@@ -521,7 +521,7 @@ extern "C" void __cdecl __AScriptHook() {
     modManager.SwitchMods(userName, gameUi, levelID);
 
     // game loop
-    bool should_ret = modManager.callBeforeGameLoop();;
+    bool should_ret = modManager.callBeforeGameLoop();
     if (should_ret) {
         return;
     }
