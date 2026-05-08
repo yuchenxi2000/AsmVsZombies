@@ -65,8 +65,6 @@ public:
     void EnterGame(int gameMode, bool hasContinueDialog);
     void BackToMain(bool isSaveData);
     void FastSaveLoad();
-    int BeforeGameLoop();
-    int AfterGameLoop();
 };
 
 inline __AScriptManager __aScriptManager;

@@ -1,4 +1,5 @@
 #include "libavz.h"
+#include "avz_mod.h"
 
 static bool __isInPaintTickRunner = false;
 
@@ -225,12 +226,10 @@ void __ABasicPainter::DrawEveryTick() {
     __isInPaintTickRunner = false;
 }
 
-extern bool IamMod;
-
 void __ABasicPainter::_BeforeScript() {
     if (!IsOpen3dAcceleration())
         return;
-    if (!IamMod) {
+    if (!modInfo.IamMod) {
         // InstallDrawHook
         *(uint16_t*)0x54C8CD = 0x5890;
         *(uint32_t*)0x667D0C = (uint32_t)&AsmDraw;
@@ -255,7 +254,7 @@ void __ABasicPainter::_ExitFight() {
     ClearFont();
     singleTickQueue.clear();
     multiTickQueue.clear();
-    if (!IamMod) {
+    if (!modInfo.IamMod) {
         // UninstallDrawHook
         *(uint16_t*)0x54C8CD = 0xD0FF;
         *(uint32_t*)0x667D0C = 0x54C650;
@@ -286,28 +285,6 @@ void __ABasicPainter::_AfterInject() {
             __ABasicPainter::handCursor = cursorInfo.hCursor;
     },
         ATickRunner::AFTER_INJECT);
-}
-
-namespace avzmod {
-    static double lastCallTime = 0.0;
-    static double lastFinishTime = 0.0;
-};
-extern "C" __declspec(dllexport) void __cdecl BeforeDrawEveryTick() {
-    avzmod::lastCallTime = __AProfiler::CurrentTime();
-
-    if (!__ABasicPainter::IsOpen3dAcceleration()) return;
-
-    // 如果要改动这段代码请咨询零度
-    if (__AD3dInfo::device != nullptr && __aGameControllor.isUpdateWindow) {
-        __AD3dInfo::device->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, 0xff000000, 0.0f, 0L);
-    }
-}
-extern "C" __declspec(dllexport) void __cdecl DrawEveryTick() {
-    __ABasicPainter::DrawEveryTick();
-}
-extern "C" __declspec(dllexport) void __cdecl AfterDrawEveryTick() {
-    avzmod::lastFinishTime = __AProfiler::CurrentTime();
-    __aProfiler.paintTime.push_back(avzmod::lastFinishTime - avzmod::lastCallTime);
 }
 
 bool __ABasicPainter::AsmDraw() {

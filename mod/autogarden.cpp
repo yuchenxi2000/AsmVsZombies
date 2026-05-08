@@ -1,7 +1,19 @@
 // 禅境花园自动脚本 by yuchenxi2000
-// 进花园自动浇水/施肥/杀虫/放音乐/捡钱
-// 功能开关：按Q开关脚本；按M重置商店里金盏花购买日期；按P给你一株盆栽（可在弹出窗口中选择植物类型）
+// 进花园自动浇水/施肥/杀虫/放音乐/捡钱/切换花园
+//
+// 功能开关：
+// 按Q开关脚本；按M重置商店里金盏花购买日期；按P给你一株盆栽（可在弹出窗口中选择植物类型）；按G让所有植物立即长大（你可能要重新进一下花园）
+// 按I显示所有植物编号，金盏花额外显示颜色代码；按U关闭安全模式，此时你可以通过按P得到任意编号的盆栽，但有崩溃风险
+// 按R拯救你的花园，如果你按U得到了一颗非法植物，那么点击花园图标就会崩游戏，此时在主界面按R就能删掉所有编号不正常的植物
+//
 // 请无视VS Code的警告，脚本能正常编译
+// 使用AvZ版本260224进行开发，其他版本不保证兼容性
+// 定义DEBUG宏进入开发者模式，此时按D在命令行里输出盆栽信息，且按P时不会判断植物ID是否合法（可能导致崩溃！）。按T在花园里展示所有植物，共六大类植物，但不要在主玩存档使用，因为会覆盖你的所有植物！
+//
+// 致谢：
+// 一些内存地址来自 https://pvz.lmintlcx.com/files/MemoryAddressList.txt
+// 一些函数来自 https://github.com/ruslan831/PlantsVsZombies-decompilation
+// 自动切换花园的想法来自AvZ群的群友天命
 #include <avz.h>
 #include <windows.h>
 
@@ -58,6 +70,16 @@ public:
     }
 };
 
+bool IsPotIDValid(int potID) {
+    // 这些是怎么玩都不会导致游戏崩溃的植物编号，包括可通过正常方法获得的，以及只能通过作弊调出来的
+    // 一些放着不会崩溃，但是用手套/卖出会崩溃的植物不包括在内
+    if (potID >= 0 && potID <= 52) {
+        return true;
+    }
+    std::vector<int> discreteCases = {58,59,60,61,63,64,66,69,70,71,72,73,79,81,82,83,84,85,86,87,89,90,92,93,94,95};
+    return std::find(discreteCases.begin(), discreteCases.end(), potID) != discreteCases.end();
+}
+
 // 花园花盆属性
 struct APotPlant : public CPvzStruct {
 protected:
@@ -66,6 +88,97 @@ protected:
 public:
     APotPlant() {
         memset(_data, 0, sizeof(_data));
+    }
+    // 盆栽ID是否合法？
+    bool HasValidID() {
+        return IsPotIDValid(Type());
+    }
+    bool IsNocturnal() {
+        int potID = Type();
+        if (potID == 11) {
+            return false;
+        }
+        if (potID >= 8 && potID <= 15) {
+            return true;
+        }
+        return potID == 31 || potID == 42 || potID == 24;
+    }
+    bool IsAquatic() {
+        int potID = Type();
+        return potID == 16 || potID == 19 || potID == 24 || potID == 43;
+    }
+    bool WasPlantFertilizedInLastHour() {
+        return _time64(nullptr) - LastFertilizedTime() < 3600;
+    }
+    bool WasPlantNeedFulfilledToday() {
+        __time64_t aNow = _time64(nullptr);
+        if (aNow - LastNeedFulfilledTime() < 3600) {
+            return true;
+        }
+
+        tm aNowTM, aLastNeedFulfilledTM;
+        _localtime64_s(&aNowTM, &aNow);
+        _localtime64_s(&aLastNeedFulfilledTM, &LastNeedFulfilledTime());
+        return aNowTM.tm_year <= aLastNeedFulfilledTM.tm_year && aNowTM.tm_yday <= aLastNeedFulfilledTM.tm_yday;
+    }
+    bool PlantShouldRefreshNeed() {
+        __time64_t aNow = _time64(nullptr);
+        if (aNow - LastWateredTime() < 3600) {
+            return false;
+        }
+        
+        tm aNowTM, aLastWateredTM;
+        _localtime64_s(&aNowTM, &aNow);
+        _localtime64_s(&aLastWateredTM, &LastWateredTime());
+        return aNowTM.tm_year > aLastWateredTM.tm_year || aNowTM.tm_yday > aLastWateredTM.tm_yday;
+    }
+    int GetPlantsNeed() {
+        if (Age() != 0 && IsNocturnal() && Location() == 0) {
+            return 0;
+        }
+        if (Location() == 2) {
+            return 0;
+        }
+
+        __time64_t aNow = _time64(nullptr);
+        bool aTooLongSinceWatering = aNow - LastWateredTime() > 15;
+        bool aTooShortSinceWatering = aNow - LastWateredTime() < 3;
+
+        if (WasPlantFertilizedInLastHour() || WasPlantNeedFulfilledToday()) {
+            return 0;
+        }
+        if (IsAquatic() && Age() != 0) {
+            if (Age() == 3) {
+                if (PlantShouldRefreshNeed()) {
+                    return 0;
+                }
+                return Requirement();
+            } else {
+                if (Location() != 3) {
+                    return 0;
+                }
+                return 2;
+            }
+        }
+        if (!aTooLongSinceWatering) {
+            return 0;
+        }
+        if (WaterCnt() < MaxWaterCnt()) {
+            return 1;
+        }
+        if (aTooShortSinceWatering) {
+            return 0;
+        }
+        if (Age() != 3) {
+            return 2;
+        }
+        if (PlantShouldRefreshNeed()) {
+            return 0;
+        }
+        if (Requirement() != 0) {
+            return Requirement();
+        }
+        return 1;
     }
     // 植物类型
     __ANodiscard int& Type() noexcept {
@@ -89,8 +202,21 @@ public:
     __ANodiscard int& isReversed() noexcept {
         return MRef<int>(0x10);
     }
-    // 金盏花颜色
-    // 0：不是金盏花
+    __ANodiscard __time64_t& LastWateredTime() noexcept {
+        return MRef<__time64_t>(0x18);
+    }
+    __ANodiscard __time64_t& LastNeedFulfilledTime() noexcept {
+        return MRef<__time64_t>(0x38);
+    }
+    __ANodiscard __time64_t& LastFertilizedTime() noexcept {
+        return MRef<__time64_t>(0x40);
+    }
+    __ANodiscard __time64_t& LastChocolateTime() noexcept {
+        return MRef<__time64_t>(0x48);
+    }
+    // 0：正常颜色
+    // 1：苍白变种（类似模仿者变出的植物）
+    // 以下是金盏花颜色
     // 2：白色
     // 3：品红
     // 4：橙色
@@ -125,15 +251,108 @@ public:
     }
 };
 
+std::vector<std::vector<int>> gGreenhouseGridPlacement = {
+    {  73,  73, 0, 0 },
+    { 155,  71, 1, 0 },
+    { 239,  68, 2, 0 },
+    { 321,  73, 3, 0 },
+    { 406,  71, 4, 0 },
+    { 484,  67, 5, 0 },
+    { 566,  70, 6, 0 },
+    { 648,  72, 7, 0 },
+    {  67, 168, 0, 1 },
+    { 150, 165, 1, 1 },
+    { 232, 170, 2, 1 },
+    { 314, 175, 3, 1 },
+    { 416, 173, 4, 1 },
+    { 497, 170, 5, 1 },
+    { 578, 164, 6, 1 },
+    { 660, 168, 7, 1 },
+    {  41, 268, 0, 2 },
+    { 130, 266, 1, 2 },
+    { 219, 260, 2, 2 },
+    { 310, 266, 3, 2 },
+    { 416, 267, 4, 2 },
+    { 504, 261, 5, 2 },
+    { 594, 265, 6, 2 },
+    { 684, 269, 7, 2 },
+    {  37, 371, 0, 3 },
+    { 124, 369, 1, 3 },
+    { 211, 368, 2, 3 },
+    { 302, 369, 3, 3 },
+    { 425, 375, 4, 3 },
+    { 512, 368, 5, 3 },
+    { 602, 365, 6, 3 },
+    { 691, 368, 7, 3 }
+};
+
+std::vector<std::vector<int>> gMushroomGridPlacement = {
+    { 110, 441, 0, 0 },
+    { 237, 360, 1, 0 },
+    { 298, 458, 2, 0 },
+    { 355, 296, 3, 0 },
+    { 387, 203, 4, 0 },
+    { 460, 385, 5, 0 },
+    { 486, 478, 6, 0 },
+    { 552, 283, 7, 0 }
+};
+
+// 正式版相比ruslan831/PlantsVsZombies-decompilation，水族馆里一些植物位置改了，下面是正确的位置
+std::vector<std::vector<int>> gAquariumGridPlacement = {
+    { 113, 185, 0, 0 },
+    { 306, 85, 1, 0 },
+    { 356, 213, 2, 0 },
+    { 522, 105, 3, 0 },
+    { 669, 270, 4, 0 },
+    { 122, 355, 5, 0 },
+    { 365, 458, 6, 0 },
+    { 504, 417, 7, 0 }
+};
+
+void GetGardenGridCoord(int gardenType, int row, int col, int & xi, int & yi) {
+    std::vector<std::vector<int>> * gridPlacement = 0;
+    switch (gardenType)
+    {
+    case 0:
+        gridPlacement = &gGreenhouseGridPlacement;
+        break;
+    
+    case 1:
+        gridPlacement = &gMushroomGridPlacement;
+        break;
+
+    case 3:
+        gridPlacement = &gAquariumGridPlacement;
+        break;
+    
+    default:
+        break;
+    }
+    if (gridPlacement) {
+        for (auto & gp : *gridPlacement) {
+            if (gp[3] == row && gp[2] == col) {
+                xi = gp[0];
+                yi = gp[1];
+            }
+        }
+    }
+}
+
+bool unsafeMode = false;
+bool plotPotID = false;
+
 // 给禅境花园新增一株盆栽
-void GivePotPlant(int plantType, int isReversed) {
+void GivePotPlant(int plantType, int isReversed, int color = 0) {
+#ifndef DEBUG
     // sanity check
-    if (plantType < 0 || plantType > 48 || isReversed < 0 || isReversed > 1) {
+    if (!unsafeMode && (!IsPotIDValid(plantType) || isReversed < 0 || isReversed > 1)) {
         return;
     }
+#endif
     APotPlant potPlant;
     potPlant.Type() = plantType;
     potPlant.isReversed() = isReversed;
+    potPlant.Color() = color;
     potPlant.MaxWaterCnt() = 3;
     // 我不知道0x81C地址处是什么，lmintlcx站里的地址表也没有，反正参数是这么传的，it just works
     asm volatile(
@@ -148,7 +367,7 @@ void GivePotPlant(int plantType, int isReversed) {
         : ASaveAllRegister);
 }
 
-int AGetPotPlantNum() {
+int & AGetPotPlantNum() {
     return AMRef<int>(0x6A9EC0, 0x82c, 0x350);
 }
 
@@ -157,7 +376,19 @@ APotPlant * AGetPotPlantArray() {
 }
 
 bool AHasMusicPlayer() {
-    return AMRef<int>(0x6A9EC0, 0x82c, 0x200);
+    return AMRef<bool>(0x6A9EC0, 0x82C, 0x200);
+}
+
+bool AHasWheelBarrow() {
+    return AMRef<bool>(0x6A9EC0, 0x82C, 0x208);
+}
+
+bool AHasMushroomGarden() {
+    return AMRef<bool>(0x6A9EC0, 0x82C, 0x20C);
+}
+
+bool AHasAquarium() {
+    return AMRef<bool>(0x6A9EC0, 0x82C, 0x224);
 }
 
 int AGetFertilizerNum() {
@@ -168,26 +399,19 @@ int AGetInsecticideNum() {
     return AMRef<int>(0x6A9EC0, 0x82c, 0x1FC) - 1000;
 }
 
+int & AGetGardenType() {
+    return AMRef<int>(0x6A9EC0, 0x81C, 0x8);
+}
+
+int & AGetMoney() {
+    return AMRef<int>(0x6A9EC0, 0x82C, 0x28);
+}
+
 void ResetMarigoldBuyDate() {
     // 重置金盏花购买日期
     AMRef<int>(0x6A9EC0, 0x82c, 0x1E8) = 0;
     AMRef<int>(0x6A9EC0, 0x82c, 0x1EC) = 0;
     AMRef<int>(0x6A9EC0, 0x82c, 0x1F0) = 0;
-}
-
-// 我不明白宝开程序员的脑子想的什么
-// 明明都是表示盆栽所在位置，为什么用不一样的enum？而且毫无规律
-bool PotPlantLocationMatch(APotPlant & pot, int scene) {
-    if (pot.Location() == 0 && scene == 7) {
-        return true;
-    }
-    if (pot.Location() == 1 && scene == 6) {
-        return true;
-    }
-    if (pot.Location() == 3 && scene == 8) {
-        return true;
-    }
-    return false;
 }
 
 // 请无视VS Code的警告，它们能正常编译
@@ -277,7 +501,7 @@ public:
         if (state == 1) {
             int holdTool = AGetMainObject()->MouseAttribution()->Type();
             if (holdTool != 0) {
-                UseTool_51EB70(AGetMainObject(), holdTool, xi, yi, 1);
+                UseTool_51F580(AGetMainObject(), holdTool, xi, yi, 1);
                 lock = 0;
                 state = 2;
                 coolDown = coolDownMax;
@@ -341,7 +565,7 @@ __MyABasicPainter _basicPainter;
 
 // 反正我只用画一段文字，直接化身CV工程师
 static bool __isInPaintTickRunner = false;
-void MyDraw(const AText& posText, int duration, float layer) {
+void MyDraw(const AText& posText, int duration, float layer, DWORD _textColor = AArgb(0xff, 0, 0xff, 0xff)) {
     // 跳帧模式下，绘制无效
     if (__aGameControllor.isSkipTick() || duration <= 0)
         return;
@@ -411,7 +635,7 @@ void MyDraw(const AText& posText, int duration, float layer) {
             }
         } while (false);
     }
-    DWORD _textColor = AArgb(0xff, 0, 0xff, 0xff);
+
     textInfo.color = _textColor;
     textInfo.x = posText.x + totalWidth * _basicPainter.posDict[int(posText.pos)][0];
     textInfo.y = posText.y + totalHeight * _basicPainter.posDict[int(posText.pos)][1];
@@ -501,6 +725,36 @@ public:
             aquarium[col] = coolDown;
         }
     }
+    bool HasAnyCooldown(int gardenType) {
+        switch (gardenType)
+        {
+        case 0:
+            for (int i = 0; i < 4; i++) {
+                for (int j = 0; j < 8; j++) {
+                    if (main_garden[i][j] > 0) {
+                        return true;
+                    }
+                }
+            }
+            break;
+        
+        case 1:
+            for (int j = 0; j < 8; j++) {
+                if (mushroom_garden[j] > 0) {
+                    return true;
+                }
+            }
+            break;
+        
+        default:
+            for (int j = 0; j < 8; j++) {
+                if (aquarium[j] > 0) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
 };
 
 GardenPosCoolDown garden_cooldown;
@@ -522,14 +776,39 @@ bool InGarden() {
 class AGardenItemCollector : public AItemCollector, AOrderedAfterInjectHook<-1> {
 public:
     void _Run() {
-        if (InGarden() && AutoTool::lock == 0) {
-            // 鼠标在返回按钮上的时候不要收集，不然崩给你看
-            int curX = AGetPvzBase()->MouseWindow()->MouseAbscissa();
-            int curY = AGetPvzBase()->MouseWindow()->MouseOrdinate();
-            if (curY <= 36 && curX >= 627 && curX <= 791) {
-                return;
+        if (!InGarden() || AutoTool::lock != 0) {
+            return;
+        }
+        // 原物品收集类实现有bug。如果在花园内，ALeftClick后，会立刻返回主界面，此时MainObject被删除；
+        // 但是后面一句ReleaseMouse的参数是MainObject，此时是空指针，引起游戏崩溃。
+        // 至于为什么直到现在没有发现这个bug，一是AvZ默认不允许自动收集在禅境花园运行；二是普通关卡点击返回按钮会跳出弹窗，而不是直接返回主界面。
+        // AItemCollector::_Run();
+        if (AGetMainObject()->GameClock() % _timeInterval != 0 || //
+            AGetMainObject()->MouseAttribution()->Type() != 0)
+            return;
+
+        AItem* collectItem = nullptr;
+        for (auto& item : aAliveItemFilter) {
+            if (!_types[item.Type()])
+                continue;
+            collectItem = &item;
+            if (ARangeIn(item.Type(), {4, 5, 6})) // 优先采集阳光
+                break;
+        }
+        if (!collectItem) // 没有要收集的物品
+            return;
+
+        float itemX = collectItem->Abscissa();
+        float itemY = collectItem->Ordinate();
+        if (itemX >= 0.0 && itemY >= 70) {
+            AAsm::ReleaseMouse();
+            int x = static_cast<int>(itemX + 30);
+            int y = static_cast<int>(itemY + 30);
+            ALeftClick(x, y);
+            // 判断是否空指针，否则会导致游戏崩溃
+            if (AGetMainObject()) {
+                AAsm::ReleaseMouse();
             }
-            AItemCollector::_Run();
         }
     }
     void Start() {
@@ -539,6 +818,15 @@ public:
         Start();
     }
     virtual void _EnterFight() override {}
+    // 这个函数用来判断当前场地有无剩余未捡金币，如果存在，那么应该捡完以后再切换花园。
+    bool hasItems() {
+        for (auto& item : aAliveItemFilter) {
+            if (!_types[item.Type()])
+                continue;
+            return true;
+        }
+        return false;
+    }
 };
 
 AGardenItemCollector garden_item_collector;
@@ -556,6 +844,41 @@ int GetPotNumInGarden(int gardenType) {
     return cnt;
 }
 
+// 这个函数不太好，要得到坐标用GetGardenGridCoord。
+// 因为根据PvZ反编译结果，判断盆栽状态主要依靠用户数据里的花园盆栽数据，植物数组只关系到外观。
+// APlant * FindPlantOnPot(APotPlant & pot) {
+//     if (!AGetMainObject()) {
+//         return nullptr;
+//     }
+//     // 必须是活的植物，否则会出错，表现为盆栽处于苗状态（age=0），浇水、施肥到age=1时，会不停施肥
+//     for (auto & plant : aAlivePlantFilter) {
+//         // 针对花盆盆栽进行特判
+//         // 不特判了，暂时无解，因为如果这样，那么盆栽为花盆时会不停浇水，目前没有好的办法
+//         if (plant.Type() == AHP_33 && pot.Type() == AHP_33) {
+//             return &plant;
+//         }
+//         if (plant.Type() != AHP_33 && plant.Row() == pot.Row() && plant.Col() == pot.Col()) {
+//             return &plant;
+//         }
+//     }
+//     return nullptr;
+// }
+
+bool GardenAttendFinished(int gardenType) {
+    int potNum = AGetPotPlantNum();
+    APotPlant * potArray = AGetPotPlantArray();
+    for (int i = 0; i < potNum; i++) {
+        APotPlant & pot = potArray[i];
+        if (pot.Location() == gardenType) {
+            if (!pot.WasPlantFertilizedInLastHour() && !pot.WasPlantNeedFulfilledToday()) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+#ifdef DEBUG
 // debug
 void DebugPrintGarden(ALogger<AConsole> & logger) {
     int potNum = AGetPotPlantNum();
@@ -563,56 +886,97 @@ void DebugPrintGarden(ALogger<AConsole> & logger) {
     logger.Info("Garden pot plant info:");
     for (int i = 0; i < potNum; i++) {
         APotPlant & pot = potArray[i];
-        for (auto & plant : aAlivePlantFilter) {
-            if (plant.Type() != AHP_33 && plant.Row() == pot.Row() && plant.Col() == pot.Col()) {
-                logger.Info("pot {:d} in: {:d} at: {:d} {:d} reversed: {:d} state: {:d} requires: {:d} water: {:d}/{:d} color: {:d}", 
-                    pot.Type(), pot.Location(), pot.Row(), pot.Col(), 
-                    pot.isReversed(), plant.State(), pot.Requirement(),
-                    pot.WaterCnt(), pot.MaxWaterCnt(), pot.Color()
-                );
-            }
-        }
+        // 需求
+        int requirement = pot.GetPlantsNeed();
+        logger.Info("pot {:d} in: {:d} at: {:d} {:d} reversed: {:d} color: {:d}: age: {:d} requires: {:d} water: {:d}/{:d}", 
+            pot.Type(), pot.Location(), pot.Row(), pot.Col(), 
+            pot.isReversed(), pot.Color(), pot.Age(), 
+            requirement, pot.WaterCnt(), pot.MaxWaterCnt()
+        );
     }
     logger.Info("Has music player: {:d}", AHasMusicPlayer());
     logger.Info("Fertilizer: {:d}", AGetFertilizerNum());
     logger.Info("Insecticide: {:d}", AGetInsecticideNum());
+    logger.Info("Garden finished: {:d} {:d} {:d}", GardenAttendFinished(0), GardenAttendFinished(1), GardenAttendFinished(3));
+    if (AGetPvzBase()->MouseWindow()->TopWindow()) {
+        logger.Info("Top window type: {:d}", AGetPvzBase()->MouseWindow()->TopWindow()->Type());
+    }
     logger.Info("");
+}
+#endif
+
+// 删除ID超出范围的植物
+void RemoveInvalidPots() {
+    int potNum = AGetPotPlantNum();
+    APotPlant * potArray = AGetPotPlantArray();
+    int idx = 0;
+    int legalPotCnt = 0;
+    while (idx < potNum) {
+        APotPlant & pot = potArray[idx];
+        if (pot.HasValidID()) {
+            if (legalPotCnt < idx) {
+                memcpy(potArray + legalPotCnt, potArray + idx, sizeof(APotPlant));
+            }
+            legalPotCnt++;
+            idx++;
+        } else {
+            idx++;
+        }
+    }
+    AGetPotPlantNum() = legalPotCnt;
 }
 
 AutoTool water_can(6, 0);  // 水壶
 AutoTool fertilizer(7, 0);  // 肥料
 AutoTool insecticide(8, 0);  // 杀虫剂
 AutoTool music_player(9, 0);  // 留声机
+// AutoTool wheel_barrow(13, 0);  // 手推车。目前不支持，会出bug，不要取消注释！！！等我有空来写
 
 #ifdef DEBUG
 ALogger<AConsole> consoleLogger;
 #endif
 
 int selectedPotPlantType = 0;
+int selectedPotPlantColor = 0;
 bool selectedPotIsReversed = false;
 bool userSelected = false;
 
 // 控件 ID
-#define IDC_EDIT_INPUT    101
+#define IDC_EDIT_INPUT1   101
 #define IDC_CHECK_OPTION  102
 #define IDC_BTN_OK        103
 #define IDC_BTN_CANCEL    104
+#define IDC_EDIT_INPUT2   105
+#define IDC_TEXT1         1001
+#define IDC_TEXT2         1002
 
 // 窗口过程
 LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
     switch (uMsg) {
         case WM_CREATE: {
-            // 文本
+            // 文本（植物编号）
             CreateWindowExW(0, L"STATIC", L"输入植物编号", 
                 WS_CHILD | WS_VISIBLE | SS_LEFT, 
                 20, 10, 140, 20, 
-                hWnd, (HMENU)1001, __aig.hInstance, NULL);
+                hWnd, (HMENU)IDC_TEXT1, __aig.hInstance, NULL);
 
-            // 创建输入框（编辑框）
+            // 创建输入框（植物编号）
             CreateWindowExW(0, L"EDIT", L"",
                 WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
-                20, 35, 260, 25,
-                hWnd, (HMENU)IDC_EDIT_INPUT, __aig.hInstance, NULL);
+                20, 35, 140, 25,
+                hWnd, (HMENU)IDC_EDIT_INPUT1, __aig.hInstance, NULL);
+            
+            // 文本（颜色）
+            CreateWindowExW(0, L"STATIC", L"颜色代码", 
+                WS_CHILD | WS_VISIBLE | SS_LEFT, 
+                180, 10, 100, 20, 
+                hWnd, (HMENU)IDC_TEXT2, __aig.hInstance, NULL);
+            
+            // 创建输入框（颜色）
+            CreateWindowExW(0, L"EDIT", L"0",
+                WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+                180, 35, 100, 25,
+                hWnd, (HMENU)IDC_EDIT_INPUT2, __aig.hInstance, NULL);
 
             // 创建复选框
             CreateWindowExW(0, L"BUTTON", L"是否反向？",
@@ -638,10 +1002,15 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
             int wmId = LOWORD(wParam);
             switch (wmId) {
                 case IDC_BTN_OK: {
-                    // 获取输入框中的文本
-                    wchar_t buffer[256] = {0};
-                    HWND hEdit = GetDlgItem(hWnd, IDC_EDIT_INPUT);
-                    GetWindowTextW(hEdit, buffer, 256);
+                    // 获取输入框中的文本：植物编号
+                    wchar_t buffer1[256] = {0};
+                    HWND hEdit1 = GetDlgItem(hWnd, IDC_EDIT_INPUT1);
+                    GetWindowTextW(hEdit1, buffer1, 256);
+
+                    // 获取输入框中的文本：颜色
+                    wchar_t buffer2[256] = {0};
+                    HWND hEdit2 = GetDlgItem(hWnd, IDC_EDIT_INPUT2);
+                    GetWindowTextW(hEdit2, buffer2, 256);
 
                     // 获取复选框状态
                     HWND hCheck = GetDlgItem(hWnd, IDC_CHECK_OPTION);
@@ -650,7 +1019,8 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
                     // 获得输入内容
                     selectedPotIsReversed = isChecked;
                     try {
-                        selectedPotPlantType = std::stoi(buffer);
+                        selectedPotPlantType = std::stoi(buffer1);
+                        selectedPotPlantColor = std::stoi(buffer2);
                         userSelected = true;
                     } catch (std::invalid_argument const& ex) {
                         break;
@@ -692,7 +1062,7 @@ int ShowPotSelectDialog() {
         wc.hInstance     = __aig.hInstance;
         wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
         wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
-        wc.lpszClassName = L"InputDialogClass";
+        wc.lpszClassName = L"AGGivePotDialogClass";
         if (!RegisterClassExW(&wc)) {
             // MessageBoxW(NULL, L"窗口类注册失败！", L"错误", MB_ICONERROR);
             return 0;
@@ -716,7 +1086,7 @@ int ShowPotSelectDialog() {
 
     // 创建窗口
     HWND hWnd = CreateWindowExW(
-        0, L"InputDialogClass", L"",
+        0, L"AGGivePotDialogClass", L"",
         WS_OVERLAPPED | WS_CAPTION | WS_VISIBLE | WS_SYSMENU,
         x, y, width, height,
         NULL, NULL, __aig.hInstance, NULL
@@ -735,6 +1105,89 @@ int ShowPotSelectDialog() {
         if (!IsWindow(hWnd)) break;
     }
     return 1;
+}
+
+// 脚本自动设置盆栽，演示作用。不要在自己主玩存档使用！它会删除所有原有盆栽！
+#ifdef DEBUG
+bool demoWhitePot = false;
+void SetPotPlantForDemo() {
+    static int demoID = 0;
+    const int demoNum = 6;
+    std::vector<int> demoScene = {0, 1, 0, 0, 0, 0};
+    std::vector<std::vector<int>> demoPots = {
+        // 正常可获得盆栽（非蘑菇园）
+        {0, 1, 2, 3, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, -1, 32, 11, 34, 35, 36, 37, 38, 39},
+        // 正常可获得盆栽（蘑菇园）
+        {8, 9, 10, 12, 13, 14, 15, 31},
+        // 正常无法获得，但表现正常，包括所有紫卡，模仿者，两种特殊坚果，花盆等
+        {33, 40, 41, 42, 43, 44, 45, 46, 47, -1, 48, 49, 51, 52, 72, 85, -1, -1, -1, -1, -1, -1, -1, -1, -1, 50, -1, 59},
+        // 都表现为一颗不停开花的小花，但用手套拿会出现僵尸
+        {58, 60, 61, 63, 64, 66, 67, 69, 70, 71, 73, 79},
+        // 不能用手套移动，会崩溃
+        {98, 111, 124, 150, 163, 176, 189, -1, 202, -1, -1, -1, -1, -1, -1, -1, 228, 241, -1, 254, -1, 267},
+    };
+    if (demoID == demoNum - 1) {  // 全不同颜色金盏花变种
+        AGetPotPlantNum() = 0;
+        APotPlant * potArray = AGetPotPlantArray();
+        int potCnt = 0;
+        for (int color = 0; color < 13; color++) {
+            GivePotPlant(38, 0, color);
+            APotPlant & pot = potArray[potCnt];
+            pot.Location() = 0;
+            pot.Row() = potCnt / 8;
+            pot.Col() = potCnt % 8;
+            pot.Age() = 3;
+            potCnt++;
+        }
+    } else {
+        AGetPotPlantNum() = 0;
+        APotPlant * potArray = AGetPotPlantArray();
+        int potCnt = 0;
+        int pos = 0;
+        for (auto potID : demoPots[demoID]) {
+            if (potID >= 0) {
+                GivePotPlant(potID, 0, demoWhitePot);
+                APotPlant & pot = potArray[potCnt];
+                pot.Location() = demoScene[demoID];
+                pot.Row() = pos / 8;
+                pot.Col() = pos % 8;
+                pot.Age() = 3;
+                potCnt++;
+            }
+            pos++;
+        }
+    }
+    demoID = (demoID + 1) % demoNum;
+}
+#endif
+
+void SwitchGarden() {
+    if (!AGetPvzBase() || AGetPvzBase()->GameUi() != 3) {
+        return;
+    }
+    if (AGetPvzBase()->LevelId() == AAsm::CHALLENGE_ZEN_GARDEN) {
+        // 花园内部切换
+        asm volatile(
+            "movl 0x6A9EC0, %%eax;"
+            "movl 0x81C(%%eax), %%eax;"
+            "pushl %%eax;"
+            "movl $0x520D30, %%eax;"
+            "call *%%eax;"
+            :
+            :
+            : ASaveAllRegister);
+    } else if (AGetPvzBase()->LevelId() == AAsm::TREE_OF_WISDOM) {
+        // 智慧树到花园
+        asm volatile(
+            "movl 0x6A9EC0, %%ecx;"
+            "movl 0x768(%%ecx), %%ecx;"
+            "movl 0x160(%%ecx), %%ecx;"
+            "movl $0x42D830, %%eax;"
+            "call *%%eax;"
+            :
+            :
+            : ASaveAllRegister);
+    }
 }
 
 void GardenInit() {
@@ -759,13 +1212,54 @@ void GardenInit() {
         // 显示一个对话框
         int status = ShowPotSelectDialog();
         if (status && userSelected) {
-            GivePotPlant(selectedPotPlantType, selectedPotIsReversed);
+            GivePotPlant(selectedPotPlantType, selectedPotIsReversed, selectedPotPlantColor);
         }
+    }, 0, ATickRunner::AFTER_INJECT);
+    // 所有植物立即长大，你可能需要退出花园然后重进来看到效果
+    AConnect('G', [] () {
+        int potNum = AGetPotPlantNum();
+        APotPlant * potArray = AGetPotPlantArray();
+        for (int i = 0; i < potNum; i++) {
+            APotPlant & pot = potArray[i];
+            pot.Age() = 3;
+        }
+    }, 0, ATickRunner::AFTER_INJECT);
+    // 救救我的存档！如果花园里有无效植物编号的盆栽，进花园游戏会崩溃，这个快捷键能删除这些有问题的植物
+    AConnect('R', [] () {
+        RemoveInvalidPots();
+    }, 0, ATickRunner::AFTER_INJECT);
+    // 画盆栽编号
+    AConnect('I', [] () {
+        plotPotID = !plotPotID;
+    }, 0, ATickRunner::AFTER_INJECT);
+    // test: switch garden
+    AConnect('S', [] () {
+        SwitchGarden();
     }, 0, ATickRunner::AFTER_INJECT);
 #ifdef DEBUG
     // debug print
     AConnect('D', [] () {
         DebugPrintGarden(consoleLogger);
+    }, 0, ATickRunner::AFTER_INJECT);
+    // demo
+    AConnect('T', [] () {
+        SetPotPlantForDemo();
+    }, 0, ATickRunner::AFTER_INJECT);
+    // demo pot color
+    AConnect('W', [] () {
+        demoWhitePot = !demoWhitePot;
+    }, 0, ATickRunner::AFTER_INJECT);
+    // mouse pos
+    AConnect('O', [] () {
+        auto wnd = AGetPvzBase()->MouseWindow();
+        if (wnd) {
+            consoleLogger.Info("mouse pos: {:d} {:d}", wnd->MouseAbscissa(), wnd->MouseOrdinate());
+        }
+    }, 0, ATickRunner::AFTER_INJECT);
+#else
+    // 不安全模式，此时可以获得任意编号的盆栽，注意不要把游戏玩崩溃了喵。
+    AConnect('U', [] () {
+        unsafeMode = !unsafeMode;
     }, 0, ATickRunner::AFTER_INJECT);
 #endif
 }
@@ -773,7 +1267,7 @@ void GardenInit() {
 void GardenFinalize() {
     // 这个是避免再次注入时，由于窗口类已经注册，导致无法弹出窗口
     if (winClassRegistered) {
-        UnregisterClassW(L"InputDialogClass", __aig.hInstance);
+        UnregisterClassW(L"AGGivePotDialogClass", __aig.hInstance);
     }
 }
 
@@ -781,21 +1275,368 @@ AOnAfterInject(GardenInit());
 
 AOnBeforeExit(GardenFinalize());
 
+void StatPotNeeds(int gardenType, int numPotWithNeed[5], int & totalPots) {
+    int potNum = AGetPotPlantNum();
+    APotPlant * potArray = AGetPotPlantArray();
+    memset(numPotWithNeed, 0, sizeof(int) * 5);
+    totalPots = 0;
+    for (int i = 0; i < potNum; i++) {
+        APotPlant & pot = potArray[i];
+        if (pot.Location() == gardenType) {
+            int need = pot.GetPlantsNeed();
+            numPotWithNeed[need]++;
+            totalPots++;
+        }
+    }
+}
+
+void FindPotAndAttend(int gardenType) {
+    int potNum = AGetPotPlantNum();
+    APotPlant * potArray = AGetPotPlantArray();
+    for (int i = 0; i < potNum; i++) {
+        APotPlant & pot = potArray[i];
+        if (pot.Location() != gardenType) continue;
+        // 得到坐标
+        int xi;
+        int yi;
+        GetGardenGridCoord(gardenType, pot.Row(), pot.Col(), xi, yi);
+        xi += 40;
+        yi += 43;
+        if (garden_cooldown.GetCoolDown(pot.Row(), pot.Col()) == 0) {
+            // 需求
+            int requirement = pot.GetPlantsNeed();
+            switch (requirement) {
+            case 0:
+                // 无需求
+                break;
+            
+            case 1:
+                // 需要浇水
+                if (water_can.Use(xi, yi)) {
+                    garden_cooldown.SetCoolDown(pot.Row(), pot.Col(), 200);
+                }
+                break;
+            
+            case 2:
+                // 需要肥料
+                if (AGetFertilizerNum() > 0) {
+                    if (fertilizer.Use(xi, yi)) {
+                        garden_cooldown.SetCoolDown(pot.Row(), pot.Col(), 200);
+                    }
+                }
+                break;
+
+            case 3:
+                // 需要杀虫
+                if (AGetInsecticideNum() > 0) {
+                    if (insecticide.Use(xi, yi)) {
+                        garden_cooldown.SetCoolDown(pot.Row(), pot.Col(), 200);
+                    }
+                }
+                break;
+
+            case 4:
+                // 需要留声机
+                if (AHasMusicPlayer()) {
+                    if (music_player.Use(xi, yi)) {
+                        garden_cooldown.SetCoolDown(pot.Row(), pot.Col(), 200);
+                    }
+                }
+                break;
+            
+            default:
+                break;
+            }
+        }
+    }
+}
+
+void DrawPotID(int gardenType) {
+    int potNum = AGetPotPlantNum();
+    APotPlant * potArray = AGetPotPlantArray();
+    for (int i = 0; i < potNum; i++) {
+        APotPlant & pot = potArray[i];
+        // 得到坐标
+        int xi;
+        int yi;
+        GetGardenGridCoord(gardenType, pot.Row(), pot.Col(), xi, yi);
+        // 画编号
+        if (pot.Location() == gardenType) {
+            std::string textID = std::to_string(pot.Type());
+            if (pot.Type() == 38) {  // 对于金盏花，额外输出颜色代码
+                textID += "," + std::to_string(pot.Color());
+            }
+            MyDraw(AText(textID, xi, yi), 1, 0.0);
+        }
+    }
+}
+
+int GetTopWndType() {
+    if (AGetPvzBase()->MouseWindow()->TopWindow()) {
+        // 3: 是否; 4: 商店
+        return AGetPvzBase()->MouseWindow()->TopWindow()->Type();
+    }
+    return 0;
+}
+
+class Buyer {
+public:
+    int lackFertilizerCnt = 0;
+    int lackInsecticideCnt = 0;
+    int state = 0;
+    int thingToBuy = 0;
+    bool enabled = true;
+    Buyer() {}
+    bool CanBuyFertilizer() {
+        return AGetMoney() >= 75 && lackFertilizerCnt > 0 && AGetFertilizerNum() <= 15;
+    }
+    bool CanBuyInsecticide() {
+        return AGetMoney() >= 100 && lackInsecticideCnt > 0 && AGetInsecticideNum() <= 15;
+    }
+    void Reset() {
+        enabled = true;
+        state = 0;
+        lackFertilizerCnt = 0;
+        lackInsecticideCnt = 0;
+        thingToBuy = 0;
+    }
+    // 返回true说明正在买东西，应该停下其他工作
+    bool Process() {
+        if (!enabled) {
+            return false;
+        }
+        if (state == 0) {
+            // 不买东西，检查有没有东西要买
+            if (CanBuyFertilizer()) {
+                state = 1;
+            } else if (CanBuyInsecticide()) {
+                state = 1;
+            }
+            return false;
+        } else if (state == 1) {
+            // 点商店按钮
+            if (GetTopWndType() == 4) {
+                state = 2;
+                return true;
+            }
+            AAsm::MouseMove(697, 67);
+            AAsm::MouseClick(697, 67, 1);
+            return true;
+        } else if (state == 2) {
+            // 进入商店
+            if (GetTopWndType() == 3) {
+                state = 3;
+                return true;
+            }
+            if (CanBuyFertilizer()) {
+                thingToBuy = 2;
+                AAsm::MouseClick(400, 350, 1);
+            } else if (CanBuyInsecticide()) {
+                thingToBuy = 3;
+                AAsm::MouseClick(471, 350, 1);
+            } else {
+                thingToBuy = 0;
+                state = 4;
+            }
+            return true;
+        } else if (state == 3) {
+            // 已选择购买物品，点击确定
+            if (GetTopWndType() == 4) {
+                if (thingToBuy == 2) {
+                    lackFertilizerCnt -= 5;
+                } else if (thingToBuy == 3) {
+                    lackFertilizerCnt -= 5;
+                }
+                state = 2;
+                return true;
+            }
+            AAsm::MouseClick(308, 392, 1);
+            return true;
+        } else if (state == 4) {
+            // 东西已买完，准备撤离
+            if (GetTopWndType() == 4) {
+                AAsm::MouseClick(434, 552, 1);
+                return true;
+            }
+            state = 0;
+            return false;
+        }
+        return false;
+    }
+};
+
+Buyer buyer;
+
+void FindGardenVacantPos(int gardenType, int & row, int & col) {
+    int hasPot[8][4];
+    memset(hasPot, 0, sizeof(int) * 32);
+    int potNum = AGetPotPlantNum();
+    APotPlant * potArray = AGetPotPlantArray();
+    for (int i = 0; i < potNum; i++) {
+        APotPlant & pot = potArray[i];
+        if (pot.Location() == gardenType) {
+            hasPot[pot.Row()][pot.Col()] = 1;
+        }
+    }
+    switch (gardenType)
+    {
+    case 0:
+        for (int i = 0; i < 8; i++) {
+            for (int j = 0; j < 4; j++) {
+                if (!hasPot[i][j]) {
+                    row = i;
+                    col = j;
+                    return;
+                }
+            }
+        }
+        break;
+
+    case 1:
+    case 3:
+        for (int i = 0; i < 8; i++) {
+            if (!hasPot[i][0]) {
+                row = i;
+                col = 0;
+                return;
+            }
+        }
+        break;
+    
+    default:
+        break;
+    }
+}
+
+// 不要取消注释，目前有bug！！！等我有空来写
+// class PotShipper {
+// public:
+//     int state = 0;
+//     int destGardenType = -1;
+//     APotPlant * targetPot = 0;
+//     void Reset() {
+//         targetPot = 0;
+//         state = 0;
+//         destGardenType = -1;
+//     }
+//     bool Process() {
+//         consoleLogger.Info("{:d}", state);
+//         if (!AHasWheelBarrow()) {
+//             return false;
+//         }
+//         if (state == 0) {
+//             if (targetPot) {
+//                 if (targetPot->Location() == 2) {
+//                     state = 1;
+//                     return true;
+//                 } else {
+//                     // APlant * plant_ptr = FindPlantOnPot(*targetPot);
+//                     // if (!plant_ptr) {
+//                     //     return false;
+//                     // }
+//                     // APlant & plant = *plant_ptr;
+//                     // int xi = plant.Abscissa() + plant.HurtWidth() / 2;
+//                     // int yi = plant.Ordinate() + plant.HurtHeight() / 2;
+//                     int xi = 0;
+//                     int yi = 0;
+//                     GetGardenGridCoord(destGardenType, targetPot->Row(), targetPot->Col(), xi, yi);
+//                     xi += 40;
+//                     yi += 43;
+//                     wheel_barrow.Use(xi, yi);
+//                     return true;
+//                 }
+//             }
+//             if (targetPot == 0) {
+//                 // 看看有没有在白天睡觉的植物
+//                 int potNum = AGetPotPlantNum();
+//                 APotPlant * potArray = AGetPotPlantArray();
+//                 targetPot = 0;
+//                 for (int i = 0; i < potNum; i++) {
+//                     APotPlant & pot = potArray[i];
+//                     if (pot.Location() == 0 && pot.IsNocturnal()) {
+//                         targetPot = &pot;
+//                         break;
+//                     }
+//                 }
+//                 if (targetPot) {
+//                     // 目标花园是否存在
+//                     if (AHasMushroomGarden() && GetPotNumInGarden(1) < 8) {
+//                         destGardenType = 1;
+//                     } else if (targetPot->Type() == 24 && AHasAquarium() && GetPotNumInGarden(3) < 8) {
+//                         destGardenType = 3;
+//                     } else {
+//                         targetPot = 0;
+//                     }
+//                 }
+//             }
+//             return false;
+//         } else if (state == 1) {
+//             if (AGetGardenType() != destGardenType) {
+//                 SwitchGarden();
+//                 return true;
+//             } else {
+//                 if (targetPot->Location() != 2) {
+//                     state = 0;
+//                     return false;
+//                 } else {
+//                     // 找一个空位
+//                     int row = 0;
+//                     int col = 0;
+//                     FindGardenVacantPos(destGardenType, row, col);
+//                     int xi = 0;
+//                     int yi = 0;
+//                     GetGardenGridCoord(destGardenType, row, col, xi, yi);
+//                     xi += 40;
+//                     yi += 43;
+//                     wheel_barrow.Use(xi, yi);
+//                     return true;
+//                 }
+//             }
+//         }
+//         return false;
+//     }
+// };
+
+// PotShipper pot_shipper;
+
 void Garden() {
-    // avoid crash
-    if (!InGarden()) {
+    // 在智慧树关卡，前往花园
+    if (AGetPvzBase() && AGetPvzBase()->GameUi() == 3 && water_can.enabled && AGetPvzBase()->LevelId() == AAsm::TREE_OF_WISDOM) {
+        SwitchGarden();
         return;
     }
+    // avoid crash
+    if (!InGarden()) {
+        buyer.Reset();  // 重置
+        // pot_shipper.Reset();
+        return;
+    }
+    // 买东西
+    if (buyer.Process()) {
+        return;
+    }
+    // 在商店时停止下面代码
+    if (GetTopWndType() == 3 || GetTopWndType() == 4) {
+        return;
+    }
+
+    // wheel_barrow.Start();  // test
+    // // 把白天会睡觉的盆栽搬到其他地方。不要取消注释，目前有bug！！！等我有空来写
+    // if (pot_shipper.Process()) {
+    //     return;
+    // }
+    
     // 切换场景后进行重置
-    static int prev_scene = 0;
-    int scene = AGetMainObject()->Scene();
-    if (scene != prev_scene) {
+    static int prevGardenType = 0;
+    int gardenType = AGetGardenType();
+    if (gardenType != prevGardenType) {
+        // wheel_barrow.Reset();  // test
         garden_cooldown.Reset();
         water_can.Reset();
         music_player.Reset();
         fertilizer.Reset();
         insecticide.Reset();
-        prev_scene = scene;
+        prevGardenType = gardenType;
     }
 
     garden_cooldown.Start();
@@ -810,43 +1651,61 @@ void Garden() {
     } else {
         MyDraw(AText("AutoGarden off", 10, 570), 1, 0.0);
     }
-    
-    // 一些游戏内数据
-    int potNum = AGetPotPlantNum();
-    APotPlant * potArray = AGetPotPlantArray();
+    // 红色警告：调试模式，以及不安全模式！
+#ifdef DEBUG
+    MyDraw(AText("DEBUG MODE", 320, 570), 1, 0.0, AArgb(0xff, 0xff, 0x00, 0x00));
+#else
+    if (unsafeMode) {
+        MyDraw(AText("UNSAFE MODE", 320, 570), 1, 0.0, AArgb(0xff, 0xff, 0x00, 0x00));
+    }
+#endif
 
-    // 状态：0：未浇水；43：已浇水；44：需要留声机/除虫；45：完成留声机/除虫
-    for (int i = 0; i < potNum; i++) {
-        APotPlant & pot = potArray[i];
-        if (PotPlantLocationMatch(pot, scene)) {
-            // find corresponding plant. 必须是活的植物，否则会出错，表现为盆栽处于苗状态（age=0），浇水、施肥到age=1时，会不停施肥
-            for (auto & plant : aAlivePlantFilter) {
-                if (plant.Type() != AHP_33 && plant.Row() == pot.Row() && plant.Col() == pot.Col() && !plant.IsSleeping() && garden_cooldown.GetCoolDown(pot.Row(), pot.Col()) == 0) {
-                    // 坐标
-                    int xi = plant.Abscissa() + plant.HurtWidth() / 2;
-                    int yi = plant.Ordinate() + plant.HurtHeight() / 2;
-                    if (plant.State() == 44) {
-                        if (pot.Requirement() == 4 && AHasMusicPlayer()) {  // 需要留声机
-                            if (music_player.Use(xi, yi)) {
-                                garden_cooldown.SetCoolDown(pot.Row(), pot.Col(), 200);
-                            }
-                        } else if (pot.Requirement() == 3 && AGetInsecticideNum() > 0) {  // 需要杀虫
-                            if (insecticide.Use(xi, yi)) {
-                                garden_cooldown.SetCoolDown(pot.Row(), pot.Col(), 200);
-                            }
-                        } else if (pot.Requirement() == 0 && AGetFertilizerNum() > 0) {  // 需要肥料
-                            if (fertilizer.Use(xi, yi)) {
-                                garden_cooldown.SetCoolDown(pot.Row(), pot.Col(), 200);
-                            }
-                        }
-                    } else if (plant.State() == 0) {  // 需要浇水
-                        if (water_can.Use(xi, yi)) {
-                            garden_cooldown.SetCoolDown(plant.Row(), plant.Col(), 200);
-                        }
-                    }
-                }
+    // 画编号
+    if (plotPotID) {
+        DrawPotID(gardenType);
+    }
+
+    // 照料植物
+    FindPotAndAttend(gardenType);
+
+    // 统计一下各花园有无需要照料的
+    // 如果缺东西就下单
+    int fertNum = AGetFertilizerNum();
+    int insectNum = AGetInsecticideNum();
+    buyer.lackFertilizerCnt = 0;
+    buyer.lackInsecticideCnt = 0;
+    bool gardenHasPotToAttend[4];
+    for (int i : {0, 1, 3}) {
+        int numPotWithNeed[5];
+        int totalPots;
+        StatPotNeeds(i, numPotWithNeed, totalPots);
+        gardenHasPotToAttend[i] = (numPotWithNeed[1] > 0) 
+        || (numPotWithNeed[2] > 0 && fertNum > 0) 
+        || (numPotWithNeed[3] > 0 && insectNum > 0) 
+        || (numPotWithNeed[4] > 0 && AHasMusicPlayer());
+        buyer.lackFertilizerCnt += numPotWithNeed[2];
+        buyer.lackInsecticideCnt += numPotWithNeed[3];
+    }
+    buyer.lackFertilizerCnt -= fertNum;
+    buyer.lackInsecticideCnt -= insectNum;
+    
+    // 当前花园已无事可做
+    if (!gardenHasPotToAttend[gardenType] && !garden_item_collector.hasItems()) {
+        // 其他花园有没有事做
+        bool shouldSwitch = false;
+        for (int i : {0, 1, 3}) {
+            if (i == gardenType) continue;
+            if (gardenHasPotToAttend[i]) {
+                shouldSwitch = true;
             }
         }
+        if (shouldSwitch && water_can.enabled) {
+            SwitchGarden();
+        }
+        buyer.enabled = true;
+    } else {
+        // 事情还没做完时，不要进商店
+        buyer.enabled = false;
     }
 }
 

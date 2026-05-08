@@ -213,37 +213,7 @@ void __AScriptManager::ScriptHook() {
     }
 }
 
-int __AScriptManager::BeforeGameLoop() {
-    RunTotal();
-    if (!__aGameControllor.isUpdateWindow)
-        return 1;
-    return 0;
-}
-int __AScriptManager::AfterGameLoop() {
-    while (__aGameControllor.isSkipTick() && AGetPvzBase()->MainObject()) {
-        RunTotal();
-        if (__aGameControllor.isAdvancedPaused)
-            return 1;
-        if (AGameIsPaused()) // 防止游戏暂停时开启跳帧发生死锁
-            return 1;
-        if (blockDepth != 0 && ANowTime(blockTime.wave) == blockTime.time) {
-            // 阻塞时间到达，必须通知阻塞函数释放阻塞
-            return 1;
-        }
-        AGetPvzBase()->MjClock() += 1;
-        AAsm::GameFightLoop();
-        AAsm::ClearObjectMemory();
-        AAsm::CheckFightExit();
-    }
-    return 0;
-}
-extern "C" __declspec(dllexport) int __cdecl BeforeGameLoop() {
-    return __aScriptManager.BeforeGameLoop();
-}
-extern "C" __declspec(dllexport) int __cdecl AfterGameLoop() {
-    return __aScriptManager.AfterGameLoop();
-}
-
+// TODO: avzloader尚未支持
 void __AScriptManager::WaitForFight(bool isSkipTick) {
     if (AGetPvzBase()->GameUi() == 3)
         return;
@@ -278,6 +248,7 @@ void __AScriptManager::WaitForFight(bool isSkipTick) {
     __APublicEnterFightHook::RunAll();
 }
 
+// avzloader不会支持，因为被标注为deprecated
 void __AScriptManager::WaitUntil(int wave, int time) {
     if (!isBlockable) {
         aLogger->Error("连接和帧运行内部不允许调用 AWaitUntil");

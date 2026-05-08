@@ -1,3 +1,62 @@
+# AvZ加载器
+
+## 介绍
+
+本仓库是支持同时加载多个脚本的非官方版本，原仓库README在本节后面。
+
+`loader`目录下实现了一个“模组”加载器，只需要把编译成动态库的AvZ脚本放在PvZ游戏所在目录的`mods`文件夹下，启动游戏时即可自动加载脚本。
+
+AvZLoader能够：
+
+* 启动游戏自动加载
+
+* 同时加载多个脚本
+
+* 方便分享脚本/插件
+
+* 热加载，可以在游戏运行时加载/卸载脚本
+
+* 限定脚本在指定用户、指定关卡运行，通过toml格式的配置文件
+
+> 关于热加载：Windows不允许覆盖被加载的dll，因此卸载`mods`目录下的脚本只有两种方式：
+> 1. 重命名（必须改后缀，比如a.dll改成a.dll.disabled，不然会被重新加载回来）
+> 2. 移出mods目录
+
+## 使用方式
+
+> 仓库里的版本理论上支持涉及__AGameControllor的高级暂停、跳帧等功能，但尚未测试
+>
+> release里版本明确不支持高级暂停、跳帧等功能，如果某个脚本使用这些功能可能会出问题
+
+1. 下载release里的版本[2.9.0_loader](https://github.com/yuchenxi2000/AsmVsZombies/releases)
+
+2. 安装AvZLoader：把`bin`目录下的`avzloader.dll`和`avzinstaller.exe`拷贝到PvZ游戏所在目录下（要有`PlantsVsZombies.exe`），运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`
+
+3. 打开`PlantsVsZombies_modded.exe`。运行脚本有两种方式：1、在PvZ游戏所在目录新建一个`mods`文件夹，把dll放在`mods`文件夹下（要改名字，因为不能加载同名的dll）；2、同时你可以用`injector.exe`注入（比如用VS Code的AvZ插件），但注入的mod只能用`injector.exe`卸载。
+
+4. release里的`bin`目录下有几个示例mod，可以直接放`mods`目录里面。如果要用`pe12.dll`，最好把`pe12.toml`（在`mod`目录下）也拷贝到`mods`目录，它能限制脚本只在生存无尽运行。
+
+脚本配置文件示例：（配置文件也支持热加载）
+```toml
+[[run]]
+[run.user]
+include = "Ycx"  # 限制只在用户名为Ycx的存档运行（PvZ用户名包括大小写！）
+# exclude = "233"  # 排除模式，注意你只能选择include或者exclude
+[run.level]
+include = 13  # 限制只在泳池无尽运行
+# exclude = [20, 24]  # 限制不在宝石迷阵系列关卡运行。这些选项都能用数组，包括上面的用户名也能用数组
+
+# 如果要对另一个用户名或者关卡配置，可以新写一个表
+[[run]]
+[run.user]
+include = "666"
+[run.level]
+include = 13
+```
+如果有一个脚本叫`script.dll`，那么对应的配置文件为`script.toml`，放到`mods`目录下。
+
+---
+
 # AsmVsZombies
 
 AvZ (Assembly vs. Zombies) 是一套使用 C++ 语言编写的高精度植物大战僵尸键控框架，理论由 yuchenxi0_0 提出，框架底层由 yuchenxi0_0 实现，和其他框架相似的接口由 vector-wlc 编写。
@@ -36,57 +95,6 @@ AvZ 脚本库：[AvZScript](https://github.com/qrmd0/AvZScript)
 > * 脚本出现错误时提示更加人性化
 > * 对硬件配置 (CPU) 的要求低
 > * 对操作时间顺序不做严格要求
-
-## AvZ加载器
-
-> by yuchenxi2000
-
-`loader`目录下实现了类似Minecraft游戏的Fabric/Forge模组加载器，只需要把编译成动态库的AvZ脚本放在PvZ游戏所在目录的`mods`文件夹下，启动游戏时即可自动加载脚本。
-
-AvZLoader能够：
-
-* 启动游戏自动加载
-
-* 同时加载多个脚本
-
-* 方便分享脚本/插件
-
-* 热加载，可以在游戏运行时加载/卸载脚本
-
-* 限定脚本在指定用户、指定关卡运行，通过toml格式的配置文件
-
-> 关于热加载：Windows不允许覆盖被加载的dll，因此卸载`mods`目录下的脚本只有两种方式：
-> 1. 重命名（必须改后缀，比如a.dll改成a.dll.disabled，不然会被重新加载回来）
-> 2. 移出mods目录
-
-使用方式：
-
-1. 下载release里的版本[2.9.0_loader](https://github.com/yuchenxi2000/AsmVsZombies/releases)
-
-2. 安装AvZLoader：把`bin`目录下的`avzloader.dll`和`avzinstaller.exe`拷贝到PvZ游戏所在目录下（要有`PlantsVsZombies.exe`），运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`
-
-3. 打开`PlantsVsZombies_modded.exe`。运行脚本有两种方式：1、在PvZ游戏所在目录新建一个`mods`文件夹，把dll放在`mods`文件夹下（要改名字，因为不能加载同名的dll）；2、同时你可以用`injector.exe`注入（比如用VS Code的AvZ插件），但注入的mod只能用`injector.exe`卸载。
-
-4. release里的`bin`目录下有几个示例mod，可以直接放`mods`目录里面。如果要用`pe12.dll`，最好把`pe12.toml`（在`mod`目录下）也拷贝到`mods`目录，它能限制脚本只在生存无尽运行。
-
-脚本配置文件示例：（配置文件也支持热加载）
-```toml
-[[run]]
-[run.user]
-include = "Ycx"  # 限制只在用户名为Ycx的存档运行（PvZ用户名包括大小写！）
-# exclude = "233"  # 排除模式，注意你只能选择include或者exclude
-[run.level]
-include = 13  # 限制只在泳池无尽运行
-# exclude = [20, 24]  # 限制不在宝石迷阵系列关卡运行。这些选项都能用数组，包括上面的用户名也能用数组
-
-# 如果要对另一个用户名或者关卡配置，可以新写一个表
-[[run]]
-[run.user]
-include = "666"
-[run.level]
-include = 13
-```
-如果有一个脚本叫`script.dll`，那么对应的配置文件为`script.toml`，放到`mods`目录下。
 
 ## 致谢
 

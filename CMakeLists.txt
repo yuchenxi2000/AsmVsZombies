@@ -31,8 +31,8 @@ set_target_properties(avzloader PROPERTIES
 )
 
 # build mod loader installer
-add_executable(avzinstaller loader/avzinstaller.cpp)
-target_link_options(avzinstaller PRIVATE -static)
+add_executable(instloader loader/instloader.cpp)
+target_link_options(instloader PRIVATE -static)
 
 # build example mods
 set(mod_srcs mod/lazy.cpp mod/autogarden.cpp mod/pe12.cpp)
@@ -55,5 +55,5 @@ add_custom_target(PackageAvz ALL
         cd ${PROJECT_SOURCE_DIR}; \
         rm bin/*.dll.a; \
         Compress-Archive -Path bin/,inc/,src/,loader/,metadata.json -Force -DestinationPath release/env2/nightly.zip"
-    DEPENDS avz injector avzloader avzinstaller ${mod_srcs}
+    DEPENDS avz injector avzloader instloader ${mod_srcs}
 )

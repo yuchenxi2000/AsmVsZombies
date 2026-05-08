@@ -1,8 +1,7 @@
 #include "libavz.h"
+#include "avz_mod.h"
 
-namespace {
 APainter _rectPainter;
-}
 
 // 保存原本的机器码
 uint16_t __AGameControllor::_oriAsm = 0;
@@ -57,7 +56,9 @@ void __AGameControllor::SetAdvancedPause(bool isAdvancedPaused, bool isPlaySound
     this->isAdvancedPaused = isAdvancedPaused;
     auto asmCode = isAdvancedPaused ? _JMP_ASM : _oriAsm;
     auto soundIdx = isAdvancedPaused ? 0x15 : 0x3A;
-    AMRef<uint16_t>(_UPDATE_ASM_ADDR_BEGIN) = asmCode;
+    if (!modInfo.IamMod) {
+        AMRef<uint16_t>(_UPDATE_ASM_ADDR_BEGIN) = asmCode;
+    }
     if (isPlaySound) {
         AAsm::PlaySample(soundIdx);
     }
@@ -69,6 +70,9 @@ void __AGameControllor::SetUpdateWindow(bool isUpdateWindow) {
 }
 
 void __AGameControllor::UpdateAdvancedPause() {
+    if (modInfo.IamMod) {
+        return;
+    }
     _rectPainter.Draw(ARect(0, 0, _pvzWidth, _pvzHeight));
     AAsm::UpdateCursorObjectAndPreview();
     --AGetMainObject()->GlobalClock();

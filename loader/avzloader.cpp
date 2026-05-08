@@ -3,6 +3,7 @@
 #include <cwchar>
 #include <d3d.h>
 #include <avz_asm.h>
+#include <avz_pvz_struct.h>
 #include <iostream>
 #include <toml++/toml.hpp>
 #include <algorithm>
@@ -136,17 +137,14 @@ public:
     std::vector<RunConf> run_conf_list;
     ModConf() {}
     ModConf(std::wstring & conf_path) {
-#ifdef DEBUG
-        std::wcout << L"load config file " << conf_path << std::endl;
-#endif
         // does file exist?
         DWORD attr = GetFileAttributesW(conf_path.c_str());
         if (attr == INVALID_FILE_ATTRIBUTES) {
             return;
         }
-#ifdef DEBUG
-        std::cout << "start parsing" << std::endl;
-#endif
+// #ifdef DEBUG
+//         std::cout << "start parsing" << std::endl;
+// #endif
         // parse config file
         toml::parse_result config = toml::parse_file(conf_path);
         if (toml::array* arr = config["run"].as_array()) {
@@ -164,10 +162,11 @@ public:
                 run_conf_list.push_back(run_conf);
             }
         }
-#ifdef DEBUG
-        // debug
-        PrintConf();
-#endif
+        std::wcout << L"load mod config file: " << conf_path << std::endl;
+// #ifdef DEBUG
+//         // debug
+//         PrintConf();
+// #endif
     }
     bool ShouldRun(const std::string & userName, int levelID) {
         if (run_conf_list.empty()) {
@@ -206,6 +205,8 @@ std::wstring GetConfFileName(std::wstring & dllName) {
 typedef void (__cdecl *FuncType)();
 typedef void (__cdecl *FuncEntryType)(HMODULE);
 typedef int (__cdecl *FuncLoopType)();
+typedef void (__cdecl *FuncSyncType)(int sync, char * state);
+typedef int (__cdecl *FuncRetIntType)();
 
 #define CHECK_FUNC(FuncName) \
 if (func##FuncName == 0) { \
@@ -225,16 +226,18 @@ public:
     // exported funcs
     FuncEntryType funcModInit;
     FuncType funcModFinalize;
-    FuncLoopType funcBeforeGameLoop;
-    FuncLoopType funcAfterGameLoop;
+    FuncType funcModRunTotal;
+    FuncSyncType funcSyncControllerState;
+    FuncRetIntType funcBlockTimeArrived;
     FuncType funcBeforeDrawEveryTick;
     FuncType funcDrawEveryTick;
     FuncType funcAfterDrawEveryTick;
     void InitFuncs() {
         funcModInit = (FuncEntryType)GetProcAddress(hMod, "ModInit");
         funcModFinalize = (FuncType)GetProcAddress(hMod, "ModFinalize");
-        funcBeforeGameLoop = (FuncLoopType)GetProcAddress(hMod, "BeforeGameLoop");
-        funcAfterGameLoop = (FuncLoopType)GetProcAddress(hMod, "AfterGameLoop");
+        funcModRunTotal = (FuncType)GetProcAddress(hMod, "ModRunTotal");
+        funcSyncControllerState = (FuncSyncType)GetProcAddress(hMod, "SyncControllerState");
+        funcBlockTimeArrived = (FuncRetIntType)GetProcAddress(hMod, "BlockTimeArrived");
         funcBeforeDrawEveryTick = (FuncType)GetProcAddress(hMod, "BeforeDrawEveryTick");
         funcDrawEveryTick = (FuncType)GetProcAddress(hMod, "DrawEveryTick");
         funcAfterDrawEveryTick = (FuncType)GetProcAddress(hMod, "AfterDrawEveryTick");
@@ -252,8 +255,9 @@ public:
         bool hasUnloadedFunc = false;
         CHECK_FUNC(ModInit)
         CHECK_FUNC(ModFinalize)
-        CHECK_FUNC(BeforeGameLoop)
-        CHECK_FUNC(AfterGameLoop)
+        CHECK_FUNC(ModRunTotal)
+        CHECK_FUNC(SyncControllerState)
+        CHECK_FUNC(BlockTimeArrived)
         CHECK_FUNC(BeforeDrawEveryTick)
         CHECK_FUNC(DrawEveryTick)
         CHECK_FUNC(AfterDrawEveryTick)
@@ -298,6 +302,58 @@ public:
     // avoid thread error during registration
     mutable std::mutex mtx_reg;
     std::condition_variable cv_reg;
+    // game controller state
+    char controllerState[12];
+    static int & StateGetAdvPause(char state[12]) {
+        return *(int*)(state);
+    }
+    static int & StateGetSkipTick(char state[12]) {
+        return *(int*)(state + 4);
+    }
+    static int & StateGetUpdateWnd(char state[12]) {
+        return *(int*)(state + 8);
+    }
+    void ResetControllerState() {
+        StateGetAdvPause(controllerState) = 0;
+        StateGetSkipTick(controllerState) = 0;
+        StateGetUpdateWnd(controllerState) = 1;
+    }
+    void SyncControllerState() {
+        ResetControllerState();
+        for (auto & mod : mod_list) {
+            if (!mod.enabled) continue;
+            char state[12];
+            mod.funcSyncControllerState(false, state);
+            if (StateGetAdvPause(state)) {
+                StateGetAdvPause(controllerState) = 1;
+            }
+            if (StateGetSkipTick(state)) {
+                StateGetSkipTick(controllerState) = 1;
+            }
+            if (!StateGetUpdateWnd(state)) {
+                StateGetUpdateWnd(controllerState) = 0;
+            }
+        }
+        // write back
+        for (auto & mod : mod_list) {
+            mod.funcSyncControllerState(true, controllerState);
+        }
+        // set advanced paused
+        if (isAdvancedPaused()) {
+            *(uint16_t *)0x41600E = 0x2AEB;
+        } else {
+            *(uint16_t *)0x41600E = 0xFD8B;
+        }
+    }
+    int & isUpdateWindow() {
+        return *(int*)(controllerState + 8);
+    }
+    int & isSkipTick() {
+        return *(int*)(controllerState + 4);
+    }
+    int & isAdvancedPaused() {
+        return *(int*)(controllerState);
+    }
     void AddToRegList(HMODULE hMod) {
         std::lock_guard<std::mutex> lock(mtx_reg);
         mod_to_reg.push_back(std::make_pair(hMod, true));
@@ -338,13 +394,16 @@ public:
                     Mod mod(modName, hMod, 0, lastWriteTime);
                     if (mod.CheckFunc()) {
                         mod_list.push_back(mod);
-                        // MessageBoxW(NULL, (std::wstring(L"Load mod ") + findData.cFileName).c_str(), L"OK", 0);
+                        std::wcout << L"Register mod: " + modPath << std::endl;
+                    } else {
+                        std::wcerr << L"Failed to register mod: " + modPath + L", due to missing API functions!" << std::endl;
                     }
                 }
             } else {
                 // find the mod to unregister
                 auto it = std::find_if(mod_list.begin(), mod_list.end(), [hMod] (const Mod & m) {return m.hMod == hMod;});
                 if (it != mod_list.end()) {
+                    std::wcout << L"Unregister mod: " + it->modName << std::endl;
                     mod_list.erase(it);
                 }
             }
@@ -356,18 +415,7 @@ public:
             mod.funcModFinalize();
         }
     }
-    bool callBeforeGameLoop() {
-        bool should_ret = false;
-        for (auto & mod : mod_list) {
-            if (mod.enabled) {
-                if (mod.funcBeforeGameLoop()) {
-                    should_ret = true;
-                }
-            }
-        }
-        return should_ret;
-    }
-    GenerateModManagerCallFunc(AfterGameLoop)
+    GenerateModManagerCallFunc(ModRunTotal)
     GenerateModManagerCallFunc(BeforeDrawEveryTick)
     GenerateModManagerCallFunc(DrawEveryTick)
     GenerateModManagerCallFunc(AfterDrawEveryTick)
@@ -403,7 +451,7 @@ public:
                             // 这块代码好像永远不会被执行，但以防万一就留着了
                             mod.funcModFinalize();
                             FreeLibrary(mod.hMod);
-                            // MessageBoxW(NULL, (std::wstring(L"Unload mod 1 ") + mod.modName).c_str(), L"OK", 0);
+                            std::wcout << std::wstring(L"Unload outdated mod: ") + mod.modName << std::endl;
                         } else {
                             // reload config
                             std::wstring configFullPath = modDir + L"\\" + GetConfFileName(modName);
@@ -424,10 +472,16 @@ public:
                         if (mod.CheckFunc()) {
                             mod.funcModInit(hMod);
                             new_mod_list.push_back(mod);
-                            // MessageBoxW(NULL, (std::wstring(L"Load mod ") + findData.cFileName).c_str(), L"OK", 0);
+                            std::wcout << std::wstring(L"Load mod: ") + mod.modName << std::endl;
+                        } else {
+                            mod.funcModFinalize();
+                            FreeLibrary(hMod);
+                            std::wcerr << std::wstring(L"Ignore mod: ") + mod.modName + L", due to missing API functions" << std::endl;
                         }
                     } else {
-                        MessageBoxW(NULL, (std::wstring(L"Failed to load ") + findData.cFileName + L" with error " + std::to_wstring(GetLastError())).c_str(), L"OK", 0);
+                        std::wstring errMessage = std::wstring(L"Failed to load mod: ") + findData.cFileName + L" with error: " + std::to_wstring(GetLastError());
+                        std::wcerr << errMessage << std::endl;
+                        MessageBoxW(NULL, errMessage.c_str(), L"OK", 0);
                     }
                 }
             } while (FindNextFileW(hFind, &findData));
@@ -442,7 +496,7 @@ public:
                 if (!found && mod.regType == 1) {
                     mod.funcModFinalize();
                     FreeLibrary(mod.hMod);
-                    // MessageBoxW(NULL, (std::wstring(L"Unload mod 2 ") + mod.modName).c_str(), L"OK", 0);
+                    std::wcout << std::wstring(L"Unload mod: ") + mod.modName << std::endl;
                 }
             }
             mod_list = new_mod_list;
@@ -463,10 +517,18 @@ void InstallDrawHook();
 void UninstallDrawHook();
 bool IsOpen3dAcceleration();
 
+// CV来的，为了不引入多的函数
+bool AGameIsPaused() {
+    if (!AGetPvzBase()->MainObject())
+        return false;
+    return AGetMainObject()->GamePaused() || AGetPvzBase()->MouseWindow()->TopWindow() != nullptr;
+}
+
 bool hasDrawHook = false;
 extern "C" void __cdecl __AScriptHook() {
     // manage mods
     if (!mod_loaded) {
+        modManager.ResetControllerState();
         // set folder
         pvzDir = GetExeDir();
         modDir = pvzDir + L"\\mods";
@@ -521,12 +583,29 @@ extern "C" void __cdecl __AScriptHook() {
     modManager.SwitchMods(userName, gameUi, levelID);
 
     // game loop
-    bool should_ret = modManager.callBeforeGameLoop();
-    if (should_ret) {
+    modManager.callModRunTotal();
+    modManager.SyncControllerState();
+    if (!modManager.isUpdateWindow())
         return;
-    }
     AAsm::GameTotalLoop();
-    modManager.callAfterGameLoop();
+    while (modManager.isSkipTick() && AGetPvzBase()->MainObject()) {
+        modManager.callModRunTotal();
+        modManager.SyncControllerState();
+        if (modManager.isAdvancedPaused())
+            return;
+        if (AGameIsPaused()) // 防止游戏暂停时开启跳帧发生死锁
+            return;
+        for (auto & mod : modManager.mod_list) {
+            if (mod.funcBlockTimeArrived()) {
+                // 阻塞时间到达，必须通知阻塞函数释放阻塞
+                return;
+            }
+        }
+        AGetPvzBase()->MjClock() += 1;
+        AAsm::GameFightLoop();
+        AAsm::ClearObjectMemory();
+        AAsm::CheckFightExit();
+    }
 }
 
 void __AInstallHook() {

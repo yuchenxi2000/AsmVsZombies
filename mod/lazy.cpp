@@ -1,5 +1,9 @@
 // 小游戏懒人合集 by yuchenxi2000
-// 包含锤僵尸、宝石迷阵、宝石迷阵转转看
+// 包含锤僵尸、宝石迷阵、宝石迷阵转转看、隐形食脑者、老虎机
+// 使用AvZ版本260224进行开发，其他版本不保证兼容性
+//
+// 致谢：
+// 隐形食脑者的逆向过程中参考了该项目 https://github.com/ruslan831/PlantsVsZombies-decompilation
 #include <avz.h>
 #include <utility>
 #include <algorithm>
@@ -269,6 +273,70 @@ ATickRunner twist_runner;
 ATickRunner upgrade_runner;
 AItemCollectorFixed aItemCollectorFixed;
 
+// 隐形食脑者僵尸显形
+DWORD addr_drawzombie = 0x52E357;
+DWORD addr_drawshadow = 0x53402B;
+
+void InstallGhoulHook() {
+    // 0x52E357: jmp 0x52E35F
+    *(char *)addr_drawzombie = '\xEB';
+    // 0x53402B: jmp 0x534033
+    *(char *)addr_drawshadow = '\xEB';
+}
+
+void UninstallGhoulHook() {
+    // 0x52E357: jne 0x52E35F
+    *(char *)addr_drawzombie = '\x75';
+    // 0x53402B: jne 0x534033
+    *(char *)addr_drawshadow = '\x75';
+}
+
+AOnAfterInject(InstallGhoulHook());
+AOnBeforeExit(UninstallGhoulHook());
+
+// 老虎机
+int GetChallegeState() {
+    return AMRef<int>(0x6A9EC0, 0x768, 0x160, 0x54);
+}
+
+void SetSlotMachineSeed(int slotSeed[3]) {
+    auto mainObj = AGetMainObject();
+    auto seedArr = mainObj->SeedArray();
+    for (int i = 0; i < 3; i++) {
+        *(int *)((char *)(seedArr + i) + 0x40 + 0x28) = slotSeed[i];
+    }
+}
+
+void SlotMachine() {
+    if (AGetPvzBase()->LevelId() != AAsm::CHALLENGE_SLOT_MACHINE) {
+        return;
+    }
+    // 转老虎机
+    if (GetChallegeState() == 0) {
+        ALeftClick(495, 48);
+    }
+    int slotSeed[3] = {56, 56, 56};  // 三个阳光
+    SetSlotMachineSeed(slotSeed);
+}
+
+ATickRunner slot_machine_runner;
+
+// 暴风雨防闪瞎眼
+DWORD addr_drawstormnight = 0x426E90;
+
+void InstallStormHook() {
+    // 0x426E90: ret 4; push ebx
+    *(DWORD *)addr_drawstormnight = 0x530004C2;
+}
+
+void UninstallStormHook() {
+    // 0x426E90: sub esp, 0x10; push ebx
+    *(DWORD *)addr_drawstormnight = 0x5310EC83;
+}
+
+AOnAfterInject(InstallStormHook());
+AOnBeforeExit(UninstallStormHook());
+
 void AScript() {
     ASetReloadMode(AReloadMode::MAIN_UI_OR_FIGHT_UI);
 
@@ -276,6 +344,7 @@ void AScript() {
     beghouled_runner.Start(Beghouled);
     twist_runner.Start(BeghouledTwist);
     upgrade_runner.Start(UpgradePlantBeghouled);
+    slot_machine_runner.Start(SlotMachine);
 
     // fix the bug on AItemCollector
     aItemCollector.Stop();
