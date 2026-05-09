@@ -1,4 +1,5 @@
 #include "libavz.h"
+#include "avz_mod.h"
 
 void __AScriptManager::GlobalInit() {
     static bool isInit = false;
@@ -234,7 +235,11 @@ void __AScriptManager::WaitForFight(bool isSkipTick) {
     }
     if (isSkipTick) {
         for (; AGetPvzBase()->GameUi() == 2;) {
-            RunTotal();
+            if (modInfo.IamMod) {
+                modInfo.loaderRunFunc();
+            } else {
+                RunTotal();
+            }
             AAsm::UpdateFrame();
         }
     }

@@ -552,6 +552,40 @@ bool AGameIsPaused() {
         return false;
     return AGetMainObject()->GamePaused() || AGetPvzBase()->MouseWindow()->TopWindow() != nullptr;
 }
+// 不知道这个painter有什么用，为简便就删了
+// APainter _rectPainter;
+// int _pvzWidth = 0;
+// int _pvzHeight = 0;
+// AAliveFilter<AZombie> aAliveZombieFilter;
+void UpdateAdvancedPause() {
+    // _rectPainter.Draw(ARect(0, 0, _pvzWidth, _pvzHeight));
+    AAsm::UpdateCursorObjectAndPreview();
+    --AGetMainObject()->GlobalClock();
+    --AGetPvzBase()->MjClock();
+    int levelId = AGetPvzBase()->LevelId(); // 关卡序号
+    if (AAsm::PUZZLE_I_ZOMBIE_1 <= levelId && levelId <= AAsm::PUZZLE_I_ZOMBIE_ENDLESS) {
+        // 刷新卡片数组
+        AAsm::RefreshAllSeedPackets();
+        // 因为 IZE 模式的僵尸渲染位置有问题，
+        // 所以需要更新僵尸位置
+        AZombie * zombieArr = AGetMainObject()->ZombieArray();
+        for (int i = 0; i < AGetMainObject()->ZombieCountMax(); i++) {
+            AZombie & zombie = zombieArr[i];
+            if (!zombie.IsDisappeared() && !zombie.IsDead() && zombie.AtWave() >= 0) {
+                zombie.MRef<int>(0x8) = zombie.Abscissa();
+                zombie.MRef<int>(0xC) = zombie.Ordinate();
+            }
+        }
+    }
+}
+
+extern "C" __declspec(dllexport) void __cdecl LoaderRunTotal() {
+    modManager.callModRunTotal();
+    modManager.SyncControllerState();
+    if (modManager.isAdvancedPaused()) {
+        UpdateAdvancedPause();
+    }
+}
 
 bool hasDrawHook = false;
 extern "C" void __cdecl __AScriptHook() {
@@ -612,14 +646,12 @@ extern "C" void __cdecl __AScriptHook() {
     modManager.SwitchMods(userName, gameUi, levelID);
 
     // game loop
-    modManager.callModRunTotal();
-    modManager.SyncControllerState();
+    LoaderRunTotal();
     if (!modManager.isUpdateWindow())
         return;
     AAsm::GameTotalLoop();
     while (modManager.isSkipTick() && AGetPvzBase()->MainObject()) {
-        modManager.callModRunTotal();
-        modManager.SyncControllerState();
+        LoaderRunTotal();
         if (modManager.isAdvancedPaused())
             return;
         if (AGameIsPaused()) // 防止游戏暂停时开启跳帧发生死锁

@@ -106,8 +106,8 @@ void Ending_Wave(int wave) {
 void AScript() {
     ASetReloadMode(AReloadMode::MAIN_UI_OR_FIGHT_UI);
 
-    // ASelectCards({AICE_SHROOM, ACOFFEE_BEAN, ADOOM_SHROOM, ALILY_PAD,
-    //     ACHERRY_BOMB, ABLOVER, AKERNEL_PULT, ACOB_CANNON, APUMPKIN, ASUNFLOWER});
+    ASelectCards({AICE_SHROOM, ACOFFEE_BEAN, ADOOM_SHROOM, ALILY_PAD,
+        ACHERRY_BOMB, ABLOVER, AKERNEL_PULT, ACOB_CANNON, APUMPKIN, ASUNFLOWER});
 
     // SetGameSpeed(5); // 以倍速运行
     //跳帧，已注释，如需要则去掉两端的 /* 以及 */ 符号

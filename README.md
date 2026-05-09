@@ -24,9 +24,9 @@ AvZLoader能够：
 
 ## 使用方式
 
-> 仓库里的版本支持涉及__AGameControllor的高级暂停、跳帧等功能，但目前不支持AWaitForFight（以及调用了该函数的函数），后面会支持
+> 仓库里的版本支持涉及__AGameControllor的高级暂停、跳帧等功能
 >
-> release里版本明确不支持高级暂停、跳帧等功能，如果某个脚本使用这些功能可能会出问题
+> release里版本明确不支持高级暂停、跳帧等功能，如果某个脚本使用这些功能可能会出问题，比如一个脚本跳帧/高级暂停时其他不运行
 
 1. 下载release里的版本[2.9.0_loader](https://github.com/yuchenxi2000/AsmVsZombies/releases)
 

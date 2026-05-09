@@ -6,6 +6,7 @@
 
 typedef void (__cdecl *FuncRegisterType)(HMODULE);
 typedef void (__cdecl *FuncSetStateType)(int);
+typedef void (__cdecl *FuncType)();
 
 class ModInfo {
 public:
@@ -16,6 +17,7 @@ public:
     FuncRegisterType unregisterFunc;
     FuncSetStateType advPauseFunc;
     FuncSetStateType updateWndFunc;
+    FuncType loaderRunFunc;
 
     ModInfo() {
         IamMod = false;
@@ -25,6 +27,7 @@ public:
         unregisterFunc = nullptr;
         advPauseFunc = nullptr;
         updateWndFunc = nullptr;
+        loaderRunFunc = nullptr;
     }
 
     bool InitLoaderAPI() {
@@ -42,6 +45,10 @@ public:
         }
         updateWndFunc = (FuncSetStateType)GetProcAddress(hLoader, "SetUpdateWindow");
         if (!updateWndFunc) {
+            return false;
+        }
+        loaderRunFunc = (FuncType)GetProcAddress(hLoader, "LoaderRunTotal");
+        if (!loaderRunFunc) {
             return false;
         }
         return true;
