@@ -36,15 +36,10 @@ void AItemCollector::Start() {
 }
 
 void AItemCollector::_Run() {
-    // if (AGetMainObject()->GameClock() % _timeInterval != 0 || //
-    //     AGetMainObject()->MouseAttribution()->Type() != 0)
-    //     return;
-    
-    // FIX: 锤僵尸关卡不工作，因为此时鼠标上有锤子（类型为7）
     if (AGetMainObject()->GameClock() % _timeInterval != 0)
         return;
     int mouseItem = AGetMainObject()->MouseAttribution()->Type();
-    if (mouseItem != 0 && mouseItem != 7)
+    if (mouseItem != 0 && mouseItem != 7) // 7 = 锤子
         return;
 
     AItem* collectItem = nullptr;
@@ -65,10 +60,7 @@ void AItemCollector::_Run() {
         int x = static_cast<int>(itemX + 30);
         int y = static_cast<int>(itemY + 30);
         ALeftClick(x, y);
-        // FIX: 判断是否空指针，否则会导致游戏崩溃，比如禅境花园里鼠标放在返回按钮上，同时物品收集类在收集
-        if (AGetMainObject()) {
-            AAsm::ReleaseMouse();
-        }
+        AAsm::ReleaseMouse();
     }
 }
 
