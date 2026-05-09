@@ -9,6 +9,8 @@
 #include <algorithm>
 #include <mutex>
 
+#define DEBUG
+
 #ifdef DEBUG
 #include <io.h>
 #endif
@@ -214,6 +216,21 @@ if (func##FuncName == 0) { \
     message += L" "#FuncName; \
 }
 
+class ControllerState {
+public:
+    // game controller state
+    char state[12];
+    int & AdvPause() {
+        return *(int*)(state);
+    }
+    int & SkipTick() {
+        return *(int*)(state + 4);
+    }
+    int & UpdateWnd() {
+        return *(int*)(state + 8);
+    }
+};
+
 class Mod {
 public:
     std::wstring modName;
@@ -303,56 +320,62 @@ public:
     mutable std::mutex mtx_reg;
     std::condition_variable cv_reg;
     // game controller state
-    char controllerState[12];
-    static int & StateGetAdvPause(char state[12]) {
-        return *(int*)(state);
-    }
-    static int & StateGetSkipTick(char state[12]) {
-        return *(int*)(state + 4);
-    }
-    static int & StateGetUpdateWnd(char state[12]) {
-        return *(int*)(state + 8);
-    }
+    ControllerState controllerState;
     void ResetControllerState() {
-        StateGetAdvPause(controllerState) = 0;
-        StateGetSkipTick(controllerState) = 0;
-        StateGetUpdateWnd(controllerState) = 1;
+        controllerState.AdvPause() = 0;
+        controllerState.SkipTick() = 0;
+        controllerState.UpdateWnd() = 1;
     }
     void SyncControllerState() {
-        ResetControllerState();
+        controllerState.SkipTick() = 0;
         for (auto & mod : mod_list) {
             if (!mod.enabled) continue;
-            char state[12];
-            mod.funcSyncControllerState(false, state);
-            if (StateGetAdvPause(state)) {
-                StateGetAdvPause(controllerState) = 1;
-            }
-            if (StateGetSkipTick(state)) {
-                StateGetSkipTick(controllerState) = 1;
-            }
-            if (!StateGetUpdateWnd(state)) {
-                StateGetUpdateWnd(controllerState) = 0;
+            ControllerState tmpState;
+            mod.funcSyncControllerState(false, tmpState.state);
+            // skip tick if any of the mods requests skipping tick
+            if (tmpState.SkipTick()) {
+                controllerState.SkipTick() = 1;
+                break;
             }
         }
         // write back
-        for (auto & mod : mod_list) {
-            mod.funcSyncControllerState(true, controllerState);
-        }
+        // for (auto & mod : mod_list) {
+        //     mod.funcSyncControllerState(true, controllerState.state);
+        // }
         // set advanced paused
+        // if (isAdvancedPaused()) {
+        //     *(uint16_t *)0x41600E = 0x2AEB;
+        // } else {
+        //     *(uint16_t *)0x41600E = 0xFD8B;
+        // }
+    }
+    int & isUpdateWindow() {
+        return controllerState.UpdateWnd();
+    }
+    int & isSkipTick() {
+        return controllerState.SkipTick();
+    }
+    int & isAdvancedPaused() {
+        return controllerState.AdvPause();
+    }
+    void SetAdvancedPaused(int adv_paused) {
+        std::cout << "set adv paused " << adv_paused << std::endl;
+        controllerState.AdvPause() = adv_paused;
+        for (auto & mod : mod_list) {
+            mod.funcSyncControllerState(true, controllerState.state);
+        }
         if (isAdvancedPaused()) {
             *(uint16_t *)0x41600E = 0x2AEB;
         } else {
             *(uint16_t *)0x41600E = 0xFD8B;
         }
     }
-    int & isUpdateWindow() {
-        return *(int*)(controllerState + 8);
-    }
-    int & isSkipTick() {
-        return *(int*)(controllerState + 4);
-    }
-    int & isAdvancedPaused() {
-        return *(int*)(controllerState);
+    void SetUpdateWindow(int update_wnd) {
+        std::cout << "set update wnd " << update_wnd << std::endl;
+        controllerState.UpdateWnd() = update_wnd;
+        for (auto & mod : mod_list) {
+            mod.funcSyncControllerState(true, controllerState.state);
+        }
     }
     void AddToRegList(HMODULE hMod) {
         std::lock_guard<std::mutex> lock(mtx_reg);
@@ -511,6 +534,12 @@ extern "C" __declspec(dllexport) void __cdecl RegisterMod(HMODULE hMod) {
 }
 extern "C" __declspec(dllexport) void __cdecl UnregisterMod(HMODULE hMod) {
     modManager.AddToUnRegList(hMod);
+}
+extern "C" __declspec(dllexport) void __cdecl SetAdvancedPaused(int adv_paused) {
+    modManager.SetAdvancedPaused(adv_paused);
+}
+extern "C" __declspec(dllexport) void __cdecl SetUpdateWindow(int update_wnd) {
+    modManager.SetUpdateWindow(update_wnd);
 }
 
 void InstallDrawHook();

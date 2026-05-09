@@ -35,7 +35,7 @@ add_executable(instloader loader/instloader.cpp)
 target_link_options(instloader PRIVATE -static)
 
 # build example mods
-set(mod_srcs mod/lazy.cpp mod/autogarden.cpp mod/pe12.cpp)
+set(mod_srcs mod/lazy.cpp mod/autogarden.cpp mod/pe12.cpp mod/advpause.cpp)
 foreach(mod_src IN LISTS mod_srcs)
     get_filename_component(mod_name ${mod_src} NAME_WE)
     add_library(${mod_name} SHARED ${mod_src})

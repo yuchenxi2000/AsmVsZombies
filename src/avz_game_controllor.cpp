@@ -58,6 +58,8 @@ void __AGameControllor::SetAdvancedPause(bool isAdvancedPaused, bool isPlaySound
     auto soundIdx = isAdvancedPaused ? 0x15 : 0x3A;
     if (!modInfo.IamMod) {
         AMRef<uint16_t>(_UPDATE_ASM_ADDR_BEGIN) = asmCode;
+    } else {
+        modInfo.advPauseFunc(isAdvancedPaused);
     }
     if (isPlaySound) {
         AAsm::PlaySample(soundIdx);
@@ -67,6 +69,9 @@ void __AGameControllor::SetAdvancedPause(bool isAdvancedPaused, bool isPlaySound
 
 void __AGameControllor::SetUpdateWindow(bool isUpdateWindow) {
     this->isUpdateWindow = isUpdateWindow;
+    if (modInfo.IamMod) {
+        modInfo.updateWndFunc(isUpdateWindow);
+    }
 }
 
 void __AGameControllor::UpdateAdvancedPause() {

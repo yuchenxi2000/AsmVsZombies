@@ -5,6 +5,7 @@
 #include <iostream>
 
 typedef void (__cdecl *FuncRegisterType)(HMODULE);
+typedef void (__cdecl *FuncSetStateType)(int);
 
 class ModInfo {
 public:
@@ -13,6 +14,8 @@ public:
     HMODULE hMod;
     FuncRegisterType registerFunc;
     FuncRegisterType unregisterFunc;
+    FuncSetStateType advPauseFunc;
+    FuncSetStateType updateWndFunc;
 
     ModInfo() {
         IamMod = false;
@@ -20,6 +23,8 @@ public:
         hMod = 0;
         registerFunc = nullptr;
         unregisterFunc = nullptr;
+        advPauseFunc = nullptr;
+        updateWndFunc = nullptr;
     }
 
     bool InitLoaderAPI() {
@@ -29,6 +34,14 @@ public:
         }
         unregisterFunc = (FuncRegisterType)GetProcAddress(hLoader, "UnregisterMod");
         if (!unregisterFunc) {
+            return false;
+        }
+        advPauseFunc = (FuncSetStateType)GetProcAddress(hLoader, "SetAdvancedPaused");
+        if (!advPauseFunc) {
+            return false;
+        }
+        updateWndFunc = (FuncSetStateType)GetProcAddress(hLoader, "SetUpdateWindow");
+        if (!updateWndFunc) {
             return false;
         }
         return true;
