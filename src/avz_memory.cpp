@@ -337,20 +337,19 @@ bool* AGetZombieTypeList() {
 }
 
 void __AGameSpeedManager::_BeforeScript() {
-    _oriTickMs = AGetPvzBase()->TickMs();
+    _oriUpdateMultiplier = AGetPvzBase()->UpdateMultiplier();
 }
 
 void __AGameSpeedManager::_ExitFight() {
-    AGetPvzBase()->TickMs() = _oriTickMs;
+    AGetPvzBase()->UpdateMultiplier() = _oriUpdateMultiplier;
 }
 
 void __AGameSpeedManager::Set(float x) {
-    if (x < 0.05 || x > 10) {
-        aLogger->Error("SetGameSpeed : 倍速设置失败，倍速设置的合法范围为 [0.05, 10]");
+    if (x < 0.01f) {
+        aLogger->Error("SetGameSpeed : 倍速 {} 不合法", x);
         return;
     }
-    int ms = int(10 / x + 0.5);
-    AGetPvzBase()->TickMs() = ms;
+    AGetPvzBase()->UpdateMultiplier() = x;
 }
 
 bool AGameIsPaused() {

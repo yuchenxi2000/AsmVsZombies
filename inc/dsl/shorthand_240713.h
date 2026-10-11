@@ -39,6 +39,19 @@ inline ATimeline Repeat(ATimeline op, int times, ATimeOffset interval) {
     return result;
 }
 
+inline ATimeline IfWave(std::set<int> waves, ATimeline then, ATimeline else_ = {}) {
+    return [=](ATime time) {
+        if (waves.contains(time.wave))
+            AConnect(time, then);
+        else
+            AConnect(time, else_);
+    };
+}
+
+inline ATimeline IfWave(int wave, ATimeline then, ATimeline else_ = {}) {
+    return IfWave(std::set<int> {wave}, then, else_);
+}
+
 class ARoofCobManager : public ACobManager {
 protected:
     std::vector<int> _columns;

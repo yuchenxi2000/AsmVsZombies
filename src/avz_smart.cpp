@@ -23,7 +23,7 @@ void AItemCollector::SetInterval(int timeInterval) {
 void AItemCollector::SetTypeList(const std::vector<int>& types) {
     _types.fill(false);
     for (auto type : types) {
-        if (type < 1 && type >= _TYPE_SIZE) {
+        if (type < 1 || type >= _TYPE_SIZE) {
             aLogger->Warning("AItemCollector::SetTypeList : 您设置的收集物类型 {} 不存在", type);
             continue;
         }

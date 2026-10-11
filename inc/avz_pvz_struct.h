@@ -155,6 +155,11 @@ public:
         return MRef<int>(0x454);
     }
 
+    // 更新速率
+    __ANodiscard double& UpdateMultiplier() noexcept {
+        return MRef<double>(0x490);
+    }
+
     // MJ 时钟
     __ANodiscard int& MjClock() noexcept {
         return MRef<int>(0x838);

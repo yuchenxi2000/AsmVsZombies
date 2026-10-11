@@ -710,6 +710,8 @@ void AAsm::LoadGame(const std::string& file) {
         : ASaveAllRegister);
     // aLogger->Info("{} {}", __LINE__, AMRef<int>(0x6a9ec0, 0x784, 0xa4 * _JACK_MUSIC_IDX + 0x4));
 
+    __aOpQueueManager.UpdateRefreshTime(true);
+
     FreePvzString(&pvzStr);
 }
 

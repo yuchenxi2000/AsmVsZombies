@@ -183,13 +183,13 @@ public:
     static void Set(float x);
 
 protected:
-    int _oriTickMs = 10;
+    double _oriUpdateMultiplier = 1.0;
     virtual void _BeforeScript() override;
     virtual void _ExitFight() override;
 } inline __agsm;
 
 // 设置游戏倍速
-// *** 注意：倍速设置的范围为 [0.05, 10]
+// *** 注意：倍速需 > 0.01
 // *** 使用示例
 // ASetGameSpeed(5) ---- 将游戏速度设置为 5 倍速
 // ASetGameSpeed(0.1) --- 将游戏速度设置为 0.1 倍速

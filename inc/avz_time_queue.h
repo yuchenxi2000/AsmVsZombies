@@ -40,7 +40,7 @@ public:
     ATime startTime; // 脚本设定的开始时间
     int totalWave;
     std::optional<__ATimeIter> Push(const ATime& time, __ABoolOperation&& timeOp);
-    void UpdateRefreshTime();
+    void UpdateRefreshTime(bool clearFuture = false);
     void SetWavelength(const std::vector<ATime>& lst);
     void AssumeWavelength(const std::vector<ATime>& lst);
     void RunOperation();

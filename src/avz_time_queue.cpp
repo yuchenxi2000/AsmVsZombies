@@ -37,7 +37,6 @@ void __AOpQueueManager::_RecordRefresh(int wave, int refreshTime) {
             aLogger->Warning("时间换算出现 {}cs 的不一致；是否开启了暂停刷新修改？", refreshTime - queues[wave].memRefreshTime);
         }
         */
-        return;
     }
     queues[wave].memRefreshTime = queues[wave].calRefreshTime = refreshTime;
     if (wave > 0 && queues[wave - 1].memRefreshTime != __AOperationQueue::UNINIT) {
@@ -91,11 +90,16 @@ void __AOpQueueManager::RunOperation() {
     }
 }
 
-void __AOpQueueManager::UpdateRefreshTime() {
+void __AOpQueueManager::UpdateRefreshTime(bool clearFuture) {
     if (AGetPvzBase()->GameUi() != 3)
         return;
     auto mo = AGetMainObject();
     int wave = mo->Wave(), gameClock = mo->GameClock();
+
+    if (clearFuture)
+        for (int w = wave + 1; w < queues.size(); ++w)
+            queues[w].memRefreshTime = queues[w].calRefreshTime = __AOperationQueue::UNINIT;
+
     if (queues[wave].memRefreshTime == __AOperationQueue::UNINIT)
         _RecordRefresh(wave, gameClock + mo->RefreshCountdown() - mo->InitialCountdown());
     std::optional<int> countdown = _GetNextWaveCountdown();
