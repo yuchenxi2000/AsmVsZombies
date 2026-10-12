@@ -104,6 +104,10 @@ public:
     using Queue = std::array<TickObjPool, PRIORITY_SIZE>;
 
     void RunQueue();
+    void Clear() {
+        for (auto& pool : _priQue)
+            pool.Clear();
+    }
 
     template <typename Op>
         requires __AIsOperation<Op>
@@ -172,7 +176,7 @@ protected:
     std::size_t _id = 0;
     int _runMode = 0;
     int _priority = 0;
-    bool _isStopped = false; // 此变量必须存在，因为中途切换了模式，会让查表失效
+    bool _isStopped = true; // 默认句柄尚未启动；中途切换模式时也需要此状态避免查表失效
 };
 
 class ATickRunnerWithNoStart : public ATickHandle {

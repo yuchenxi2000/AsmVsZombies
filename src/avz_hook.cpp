@@ -27,12 +27,13 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         // attach to process
         // return FALSE to fail DLL load
         // test if we are loaded as mod
-        if (*(uint32_t*)0x667bc0 != 0x452650) {
+        if (GetModuleHandleW(L"avzloader.dll") != nullptr) {
             // the hook is on, I am a mod
             // init
             ModInit(hinstDLL);
             // init as mod
-            modInfo.InitAsMod(hinstDLL);
+            if (!modInfo.InitAsMod(hinstDLL))
+                return FALSE;
         } else {
             modInfo.IamMod = false;
             ModInit(hinstDLL);
@@ -41,6 +42,15 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         break;
 
     case DLL_PROCESS_DETACH:
+        if (lpvReserved != nullptr) {
+            // CRT global destructors still run after DllMain. Their runners
+            // must not query queues/loggers that may already be destroyed.
+            // Game objects and other threads may also be gone: no script hooks.
+            __aScriptManager.willBeExit = true;
+            __aScriptManager.isExit = true;
+            __aig.tickManagers = nullptr;
+            break;
+        }
         // detach from process
         if (modInfo.IamMod) {
             // finalize

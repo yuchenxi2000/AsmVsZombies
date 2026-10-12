@@ -9,7 +9,7 @@
 #include <algorithm>
 #include <mutex>
 
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
 #include <io.h>
@@ -47,506 +47,49 @@ std::wstring GetExeDir() {
 std::wstring pvzDir;
 std::wstring modDir;
 
-struct MonitorParam {
-    std::wstring targetDir;
-    HANDLE hStopEvent;
-    HANDLE hChangeEvent;
-};
-
-// mods目录监控线程，实现热加载
-DWORD WINAPI MonitorThreadProc(LPVOID lpParam) {
-    auto * params = static_cast<MonitorParam *>(lpParam);
-    HANDLE hStopEvent = params->hStopEvent;
-    HANDLE hChangeEvent = params->hChangeEvent;
-
-    HANDLE hDir = CreateFileW(params->targetDir.c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_DELETE | FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, NULL);
-    if (hDir == INVALID_HANDLE_VALUE) {
-        MessageBoxW(NULL, (std::wstring(L"Failed to monitor folder ") + params->targetDir).c_str(), L"OK", 0);
-        return 1;
-    }
-    size_t buffer_size = 65536;
-    char * buffer = new char[buffer_size];
-    DWORD bytesReturned = 0;
-    OVERLAPPED overlapped = {0};
-    overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-    if (!overlapped.hEvent) {
-        std::cerr << "Failed to create overlapped event" << std::endl;
-        CloseHandle(hDir);
-        delete [] buffer;
-        return 1;
-    }
-
-    HANDLE waitHandles[2] = {hStopEvent, overlapped.hEvent};
-
-    while (true) {
-        BOOL bSuccess = ReadDirectoryChangesW(hDir, buffer, buffer_size, TRUE, FILE_NOTIFY_CHANGE_FILE_NAME | FILE_NOTIFY_CHANGE_DIR_NAME | FILE_NOTIFY_CHANGE_LAST_WRITE | FILE_NOTIFY_CHANGE_CREATION, &bytesReturned, &overlapped, NULL);
-        DWORD lastError = GetLastError();
-        if (!bSuccess && lastError != ERROR_IO_PENDING) {
-            std::cerr << "Failed to call ReadDirectoryChangesW with error code: " << lastError << std::endl;
-            break;
-        }
-        DWORD waitResult = WaitForMultipleObjects(2, waitHandles, FALSE, INFINITE);
-        if (waitResult == WAIT_OBJECT_0) {
-            // Stop thread
-            break;
-        } else if (waitResult == WAIT_OBJECT_0 + 1) {
-            // File changed
-            GetOverlappedResult(hDir, &overlapped, &bytesReturned, FALSE);
-            SetEvent(hChangeEvent);
-            ResetEvent(overlapped.hEvent);
-        } else {
-            // error
-            break;
-        }
-    }
-    CloseHandle(overlapped.hEvent);
-    CloseHandle(hDir);
-    delete [] buffer;
-    return 0;
-}
-
-class RunConf {
-public:
-    std::vector<std::string> users;
-    std::vector<int> levels;
-    bool exclude_user;
-    bool exclude_level;
-    RunConf() : exclude_user(true), exclude_level(true) {}
-    bool ShouldRun(const std::string & userName, int levelID) {
-        auto p1 = std::find(users.begin(), users.end(), userName);
-        if ((p1 == users.end()) ^ exclude_user) return false;
-        auto p2 = std::find(levels.begin(), levels.end(), levelID);
-        if ((p2 == levels.end()) ^ exclude_level) return false;
-        return true;
-    }
-};
-
-template <class T>
-void TomlGetValueOrList(toml::node_view<toml::node> node, std::vector<T> & dest_list) {
-    if (auto p = node.value<T>()) {
-        dest_list.push_back(*p);
-    } else if (auto p = node.as_array()) {
-        for (auto & el : *p) {
-            if (auto v = el.value<T>()) {
-                dest_list.push_back(*v);
-            }
-        }
-    }
-}
-
-class ModConf {
-public:
-    std::vector<RunConf> run_conf_list;
-    ModConf() {}
-    ModConf(std::wstring & conf_path) {
-        // does file exist?
-        DWORD attr = GetFileAttributesW(conf_path.c_str());
-        if (attr == INVALID_FILE_ATTRIBUTES) {
-            return;
-        }
-// #ifdef DEBUG
-//         std::cout << "start parsing" << std::endl;
-// #endif
-        // parse config file
-        toml::parse_result config = toml::parse_file(conf_path);
-        if (toml::array* arr = config["run"].as_array()) {
-            for (auto & tab : *arr) {
-                RunConf run_conf;
-                // user
-                run_conf.exclude_user = !tab.at_path("user.include");
-                TomlGetValueOrList(tab.at_path("user.include"), run_conf.users);
-                TomlGetValueOrList(tab.at_path("user.exclude"), run_conf.users);
-                // level
-                run_conf.exclude_level = !tab.at_path("level.include");
-                TomlGetValueOrList(tab.at_path("level.include"), run_conf.levels);
-                TomlGetValueOrList(tab.at_path("level.exclude"), run_conf.levels);
-                // add conf
-                run_conf_list.push_back(run_conf);
-            }
-        }
-        std::wcout << L"load mod config file: " << conf_path << std::endl;
-// #ifdef DEBUG
-//         // debug
-//         PrintConf();
-// #endif
-    }
-    bool ShouldRun(const std::string & userName, int levelID) {
-        if (run_conf_list.empty()) {
-            return true;
-        }
-        for (auto & run_conf : run_conf_list) {
-            if (run_conf.ShouldRun(userName, levelID)) {
-                return true;
-            }
-        }
-        return false;
-    }
-    void PrintConf() {
-        for (auto & run_conf : run_conf_list) {
-            std::cout << "user: exclude  = " << run_conf.exclude_user << std::endl;
-            std::cout << "      name arr =";
-            for (auto & name : run_conf.users) {
-                std::cout << " " << name;
-            }
-            std::cout << std::endl;
-            std::cout << "level: exclude   = " << run_conf.exclude_level << std::endl;
-            std::cout << "       level arr =";
-            for (auto & lvl : run_conf.levels) {
-                std::cout << " " << lvl;
-            }
-            std::cout << std::endl;
-        }
-    }
-};
-
-std::wstring GetConfFileName(std::wstring & dllName) {
-    size_t pos = dllName.find_last_of(L".");
-    return dllName.substr(0, pos) + L".toml";
-}
-
-typedef void (__cdecl *FuncType)();
-typedef void (__cdecl *FuncEntryType)(HMODULE);
-typedef int (__cdecl *FuncLoopType)();
-typedef void (__cdecl *FuncSyncType)(int sync, char * state);
-typedef int (__cdecl *FuncRetIntType)();
-
-#define CHECK_FUNC(FuncName) \
-if (func##FuncName == 0) { \
-    hasUnloadedFunc = true; \
-    message += L" "#FuncName; \
-}
-
-class ControllerState {
-public:
-    // game controller state
-    char state[12];
-    int & AdvPause() {
-        return *(int*)(state);
-    }
-    int & SkipTick() {
-        return *(int*)(state + 4);
-    }
-    int & UpdateWnd() {
-        return *(int*)(state + 8);
-    }
-};
-
-class Mod {
-public:
-    std::wstring modName;
-    HMODULE hMod;
-    int regType;
-    FILETIME lastWriteTime;
-    bool enabled;
-    // mod conf
-    ModConf conf;
-    // exported funcs
-    FuncEntryType funcModInit;
-    FuncType funcModFinalize;
-    FuncType funcModRunTotal;
-    FuncSyncType funcSyncControllerState;
-    FuncRetIntType funcBlockTimeArrived;
-    FuncType funcBeforeDrawEveryTick;
-    FuncType funcDrawEveryTick;
-    FuncType funcAfterDrawEveryTick;
-    void InitFuncs() {
-        funcModInit = (FuncEntryType)GetProcAddress(hMod, "ModInit");
-        funcModFinalize = (FuncType)GetProcAddress(hMod, "ModFinalize");
-        funcModRunTotal = (FuncType)GetProcAddress(hMod, "ModRunTotal");
-        funcSyncControllerState = (FuncSyncType)GetProcAddress(hMod, "SyncControllerState");
-        funcBlockTimeArrived = (FuncRetIntType)GetProcAddress(hMod, "BlockTimeArrived");
-        funcBeforeDrawEveryTick = (FuncType)GetProcAddress(hMod, "BeforeDrawEveryTick");
-        funcDrawEveryTick = (FuncType)GetProcAddress(hMod, "DrawEveryTick");
-        funcAfterDrawEveryTick = (FuncType)GetProcAddress(hMod, "AfterDrawEveryTick");
-    }
-    Mod(const std::wstring & modName, HMODULE hMod, int regType, FILETIME lastWriteTime) : modName(modName), hMod(hMod), regType(regType), lastWriteTime(lastWriteTime), enabled(true) {
-        InitFuncs();
-    }
-    Mod(const std::wstring & modName, HMODULE hMod, int regType, FILETIME lastWriteTime, std::wstring & conf_path) : modName(modName), hMod(hMod), regType(regType), lastWriteTime(lastWriteTime), enabled(true), conf(conf_path) {
-        InitFuncs();
-    }
-    bool CheckFunc() {
-        std::wstring message = L"Unloaded func in mod ";
-        message += modName;
-        message += L":";
-        bool hasUnloadedFunc = false;
-        CHECK_FUNC(ModInit)
-        CHECK_FUNC(ModFinalize)
-        CHECK_FUNC(ModRunTotal)
-        CHECK_FUNC(SyncControllerState)
-        CHECK_FUNC(BlockTimeArrived)
-        CHECK_FUNC(BeforeDrawEveryTick)
-        CHECK_FUNC(DrawEveryTick)
-        CHECK_FUNC(AfterDrawEveryTick)
-        if (hasUnloadedFunc) {
-            MessageBoxW(NULL, message.c_str(), L"OK", 0);
-        }
-        return !hasUnloadedFunc;
-    }
-    void SwitchEnabled(const std::string & userName, int levelID) {
-        enabled = conf.ShouldRun(userName, levelID);
-    }
-};
-
-// mod folder monitor
-HANDLE hStopEvent = 0;
-HANDLE hChangeEvent = 0;
-HANDLE hThread = 0;
-
-#define GenerateModManagerCallFunc(funcName) \
-void call##funcName() { \
-    for (auto & mod : mod_list) { \
-        if (mod.enabled) { \
-            mod.func##funcName(); \
-        } \
-    } \
-}
-
-#define GenerateModManagerInitFinalizeFunc(funcName) \
-void call##funcName() { \
-    for (auto & mod : mod_list) { \
-        mod.func##funcName(); \
-    } \
-}
-
-bool mod_loaded = false;
-class ModManager {
-public:
-    // list of loaded mods
-    std::vector<Mod> mod_list;
-    // list of mods to be registered/unregistered
-    std::vector<std::pair<HMODULE, bool>> mod_to_reg;
-    // avoid thread error during registration
-    mutable std::mutex mtx_reg;
-    std::condition_variable cv_reg;
-    // game controller state
-    ControllerState controllerState;
-    void ResetControllerState() {
-        controllerState.AdvPause() = 0;
-        controllerState.SkipTick() = 0;
-        controllerState.UpdateWnd() = 1;
-    }
-    void SyncControllerState() {
-        controllerState.SkipTick() = 0;
-        for (auto & mod : mod_list) {
-            if (!mod.enabled) continue;
-            ControllerState tmpState;
-            mod.funcSyncControllerState(false, tmpState.state);
-            // skip tick if any of the mods requests skipping tick
-            if (tmpState.SkipTick()) {
-                controllerState.SkipTick() = 1;
-                break;
-            }
-        }
-        // write back
-        // for (auto & mod : mod_list) {
-        //     mod.funcSyncControllerState(true, controllerState.state);
-        // }
-        // set advanced paused
-        // if (isAdvancedPaused()) {
-        //     *(uint16_t *)0x41600E = 0x2AEB;
-        // } else {
-        //     *(uint16_t *)0x41600E = 0xFD8B;
-        // }
-    }
-    int & isUpdateWindow() {
-        return controllerState.UpdateWnd();
-    }
-    int & isSkipTick() {
-        return controllerState.SkipTick();
-    }
-    int & isAdvancedPaused() {
-        return controllerState.AdvPause();
-    }
-    void SetAdvancedPaused(int adv_paused) {
-        std::cout << "set adv paused " << adv_paused << std::endl;
-        controllerState.AdvPause() = adv_paused;
-        for (auto & mod : mod_list) {
-            mod.funcSyncControllerState(true, controllerState.state);
-        }
-        if (isAdvancedPaused()) {
-            *(uint16_t *)0x41600E = 0x2AEB;
-        } else {
-            *(uint16_t *)0x41600E = 0xFD8B;
-        }
-    }
-    void SetUpdateWindow(int update_wnd) {
-        std::cout << "set update wnd " << update_wnd << std::endl;
-        controllerState.UpdateWnd() = update_wnd;
-        for (auto & mod : mod_list) {
-            mod.funcSyncControllerState(true, controllerState.state);
-        }
-    }
-    void AddToRegList(HMODULE hMod) {
-        std::lock_guard<std::mutex> lock(mtx_reg);
-        mod_to_reg.push_back(std::make_pair(hMod, true));
-    }
-    void AddToUnRegList(HMODULE hMod) {
-        std::lock_guard<std::mutex> lock(mtx_reg);
-        mod_to_reg.push_back(std::make_pair(hMod, false));
-    }
-    void RegisterAllMods() {
-        // register all mods, injected (not in folder)
-        std::lock_guard<std::mutex> lock(mtx_reg);
-        for (auto & p : mod_to_reg) {
-            HMODULE hMod = p.first;
-            bool isReg = p.second;
-            if (isReg) {
-                // check if already registered
-                auto it = std::find_if(mod_list.begin(), mod_list.end(), [hMod] (const Mod & m) {return m.hMod == hMod;});
-                if (it == mod_list.end()) {
-                    // not registered
-                    wchar_t buffer[MAX_PATH];
-                    GetModuleFileNameW(hMod, buffer, MAX_PATH);
-                    std::wstring modPath = buffer;
-                    // get filename
-                    size_t pos = modPath.find_last_of(L"\\/");
-                    std::wstring modName;
-                    if (pos == std::wstring::npos) {
-                        modName = modPath;
-                    } else {
-                        size_t len = modPath.size() - pos;
-                        modName = modPath.substr(pos, len);
-                    }
-                    FILETIME lastWriteTime;
-                    HANDLE hModFile = CreateFileW(modPath.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-                    if (hModFile != INVALID_HANDLE_VALUE) {
-                        GetFileTime(hModFile, NULL, NULL, &lastWriteTime);
-                        CloseHandle(hModFile);
-                    }
-                    Mod mod(modName, hMod, 0, lastWriteTime);
-                    if (mod.CheckFunc()) {
-                        mod_list.push_back(mod);
-                        std::wcout << L"Register mod: " + modPath << std::endl;
-                    } else {
-                        std::wcerr << L"Failed to register mod: " + modPath + L", due to missing API functions!" << std::endl;
-                    }
-                }
-            } else {
-                // find the mod to unregister
-                auto it = std::find_if(mod_list.begin(), mod_list.end(), [hMod] (const Mod & m) {return m.hMod == hMod;});
-                if (it != mod_list.end()) {
-                    std::wcout << L"Unregister mod: " + it->modName << std::endl;
-                    mod_list.erase(it);
-                }
-            }
-        }
-        mod_to_reg.clear();
-    }
-    void callModFinalize() {
-        for (auto & mod : mod_list) {
-            mod.funcModFinalize();
-        }
-    }
-    GenerateModManagerCallFunc(ModRunTotal)
-    GenerateModManagerCallFunc(BeforeDrawEveryTick)
-    GenerateModManagerCallFunc(DrawEveryTick)
-    GenerateModManagerCallFunc(AfterDrawEveryTick)
-    void SwitchMods(std::string & userName, int gameUi, int levelID) {
-        if (gameUi == 3 || gameUi == 2) {
-            for (auto & mod : mod_list) {
-                mod.SwitchEnabled(userName, levelID);
-            }
-        }
-    }
-    void LoadAllMods() {
-        // load all mods
-        std::wstring searchPath = modDir + L"\\*.dll";
-        WIN32_FIND_DATAW findData;
-        HANDLE hFind = FindFirstFileW(searchPath.c_str(), &findData);
-        if (hFind != INVALID_HANDLE_VALUE) {
-            std::vector<Mod> new_mod_list;
-            do {
-                if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
-                std::wstring fullPath = modDir + L"\\" + findData.cFileName;
-                FILETIME lastWriteTime = findData.ftLastWriteTime;
-                std::wstring modName(findData.cFileName);
-                bool already_loaded = false;
-                // is the mod loaded?
-                for (auto & mod : mod_list) {
-                    if (mod.modName == modName) {
-                        // is the mod modified?
-                        if (CompareFileTime(&mod.lastWriteTime, &lastWriteTime) != 0) {
-                            // modified, unload this first
-                            // 貌似Windows不允许更新被打开的文件，因此卸载脚本只有两种方式：
-                            // 1. 重命名（必须改后缀，比如a.dll改成a.dll.disabled，不然会被重新加载回来）
-                            // 2. 移出mods目录
-                            // 这块代码好像永远不会被执行，但以防万一就留着了
-                            mod.funcModFinalize();
-                            FreeLibrary(mod.hMod);
-                            std::wcout << std::wstring(L"Unload outdated mod: ") + mod.modName << std::endl;
-                        } else {
-                            // reload config
-                            std::wstring configFullPath = modDir + L"\\" + GetConfFileName(modName);
-                            mod.conf = ModConf(configFullPath);
-                            new_mod_list.push_back(mod);
-                            already_loaded = true;
-                        }
-                        break;
-                    }
-                }
-                if (!already_loaded) {
-                    // load this mod
-                    HMODULE hMod = LoadLibraryW(fullPath.c_str());
-                    if (hMod) {
-                        // find config file (DLL name without suffix + ".toml")
-                        std::wstring configFullPath = modDir + L"\\" + GetConfFileName(modName);
-                        Mod mod(modName, hMod, 1, lastWriteTime, configFullPath);
-                        if (mod.CheckFunc()) {
-                            mod.funcModInit(hMod);
-                            new_mod_list.push_back(mod);
-                            std::wcout << std::wstring(L"Load mod: ") + mod.modName << std::endl;
-                        } else {
-                            mod.funcModFinalize();
-                            FreeLibrary(hMod);
-                            std::wcerr << std::wstring(L"Ignore mod: ") + mod.modName + L", due to missing API functions" << std::endl;
-                        }
-                    } else {
-                        std::wstring errMessage = std::wstring(L"Failed to load mod: ") + findData.cFileName + L" with error: " + std::to_wstring(GetLastError());
-                        std::wcerr << errMessage << std::endl;
-                        MessageBoxW(NULL, errMessage.c_str(), L"OK", 0);
-                    }
-                }
-            } while (FindNextFileW(hFind, &findData));
-            // unload old mods. only unload these mods loaded from folder
-            for (auto & mod : mod_list) {
-                bool found = false;
-                for (auto & new_mod : new_mod_list) {
-                    if (new_mod.modName == mod.modName) {
-                        found = true;
-                    }
-                }
-                if (!found && mod.regType == 1) {
-                    mod.funcModFinalize();
-                    FreeLibrary(mod.hMod);
-                    std::wcout << std::wstring(L"Unload mod: ") + mod.modName << std::endl;
-                }
-            }
-            mod_list = new_mod_list;
-        }
-    }
-};
+#include "mod_manager.h"
+#include "directory_monitor.h"
 
 ModManager modManager;
+MonitorParam monitorParams;
+HANDLE monitorThread = nullptr;
+bool mod_loaded = false;
 
-extern "C" __declspec(dllexport) void __cdecl RegisterMod(HMODULE hMod) {
-    modManager.AddToRegList(hMod);
+extern "C" __declspec(dllexport) void __cdecl RegisterMod(HMODULE module) {
+    modManager.AddToRegList(module);
 }
-extern "C" __declspec(dllexport) void __cdecl UnregisterMod(HMODULE hMod) {
-    modManager.AddToUnRegList(hMod);
+extern "C" __declspec(dllexport) void __cdecl UnregisterMod(HMODULE module) {
+    modManager.AddToUnRegList(module);
 }
-extern "C" __declspec(dllexport) void __cdecl SetAdvancedPaused(int adv_paused) {
-    modManager.SetAdvancedPaused(adv_paused);
+extern "C" __declspec(dllexport) void __cdecl SetAdvancedPaused(int paused) {
+    modManager.SetAdvancedPaused(paused);
 }
-extern "C" __declspec(dllexport) void __cdecl SetUpdateWindow(int update_wnd) {
-    modManager.SetUpdateWindow(update_wnd);
+extern "C" __declspec(dllexport) void __cdecl SetUpdateWindow(int update) {
+    modManager.SetUpdateWindow(update);
+}
+
+void PollModDirectory() {
+    static unsigned observed = 0, processed = 0;
+    static ULONGLONG changedAt = 0, scannedAt = 0;
+    ULONGLONG now = GetTickCount64();
+    unsigned generation = monitorParams.generation.load();
+    if (generation != observed) {
+        observed = generation;
+        changedAt = now;
+    }
+    if (!scannedAt || (observed != processed && now - changedAt >= 200 && now - scannedAt >= 200)
+        || now - scannedAt >= 2000) {
+        if (modManager.LoadAllMods())
+            processed = generation;
+        scannedAt = now;
+    }
 }
 
 void InstallDrawHook();
 void UninstallDrawHook();
 bool IsOpen3dAcceleration();
 
-// CV来的，为了不引入多的函数
+// Copy-Paste来的，为了不引入多的函数
 bool AGameIsPaused() {
     if (!AGetPvzBase()->MainObject())
         return false;
@@ -580,50 +123,38 @@ void UpdateAdvancedPause() {
 }
 
 extern "C" __declspec(dllexport) void __cdecl LoaderRunTotal() {
+    if (!mod_loaded)
+        return;
+    PollModDirectory();
+    auto base = AGetPvzBase();
+    bool hasUser = base->MPtr<APvzStruct>(0x82c) != nullptr;
+    std::string user = hasUser ? std::string(AGetUserName(), AGetUserNameLen()) : std::string();
+    modManager.Manage(user, hasUser ? AGetUserIdx() : -1, base->GameUi(), base->LevelId());
     modManager.callModRunTotal();
     modManager.SyncControllerState();
-    if (modManager.isAdvancedPaused()) {
+    if (modManager.isAdvancedPaused() && base->MainObject() && base->GameUi() == 3) {
         UpdateAdvancedPause();
     }
+    modManager.Reconcile();
 }
 
 bool hasDrawHook = false;
 extern "C" void __cdecl __AScriptHook() {
     // manage mods
     if (!mod_loaded) {
-        modManager.ResetControllerState();
         // set folder
         pvzDir = GetExeDir();
         modDir = pvzDir + L"\\mods";
         // load mods
-        modManager.LoadAllMods();
+        CreateDirectoryW(modDir.c_str(), nullptr);
+        modManager.directory = modDir;
+        modManager.applyPause = [](int paused) { *(uint16_t*)0x41600E = paused ? 0x2AEB : 0xFD8B; };
+        monitorParams.targetDir = modDir;
+        monitorParams.stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (monitorParams.stopEvent)
+            monitorThread = CreateThread(nullptr, 0, MonitorThreadProc, &monitorParams, 0, nullptr);
+        // Periodic scans also cover watcher failure.
         mod_loaded = true;
-        // start monitor thread
-        hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-        hChangeEvent = CreateEvent(NULL, FALSE, FALSE, NULL);
-        MonitorParam params{modDir, hStopEvent, hChangeEvent};
-        hThread = CreateThread(NULL, 0, MonitorThreadProc, &params, 0, NULL);
-        if (!hThread) {
-            MessageBoxW(NULL, L"Failed to create monitor thread!", L"OK", 0);
-        }
-    } else {
-        // manage mods in folder
-        static int countDown = 0;  // 加个冷却时间，以防文件更新太频繁，导致频繁重加载脚本
-        const int countDownMax = 50;
-        DWORD waitResult = WaitForSingleObject(hChangeEvent, 0);
-        if (waitResult == WAIT_OBJECT_0) {
-            if (countDown <= 0) {
-                // reload mods
-                modManager.LoadAllMods();
-                countDown = countDownMax;
-                ResetEvent(hChangeEvent);  // 必须reset，不然只能热加载一次
-            }
-        }
-        if (countDown > 0) {
-            countDown--;
-        }
-        // register mods injected but not in folder
-        modManager.RegisterAllMods();
     }
 
     // install draw hook
@@ -639,12 +170,6 @@ extern "C" void __cdecl __AScriptHook() {
         }
     }
 
-    // should the mod run on this level and this user?
-    std::string userName(AGetUserName(), AGetUserNameLen());
-    int levelID = AGetPvzBase()->LevelId();
-    int gameUi = AGetPvzBase()->GameUi();
-    modManager.SwitchMods(userName, gameUi, levelID);
-
     // game loop
     LoaderRunTotal();
     if (!modManager.isUpdateWindow())
@@ -656,12 +181,10 @@ extern "C" void __cdecl __AScriptHook() {
             return;
         if (AGameIsPaused()) // 防止游戏暂停时开启跳帧发生死锁
             return;
-        for (auto & mod : modManager.mod_list) {
-            if (mod.funcBlockTimeArrived()) {
-                // 阻塞时间到达，必须通知阻塞函数释放阻塞
-                return;
-            }
-        }
+        if (modManager.BlockTimeArrived())
+            return;
+        if (!AGetPvzBase()->MainObject() || AGetPvzBase()->GameUi() != 3)
+            return;
         AGetPvzBase()->MjClock() += 1;
         AAsm::GameFightLoop();
         AAsm::ClearObjectMemory();
@@ -713,6 +236,7 @@ bool IsOpen3dAcceleration() {
 }
 
 bool AsmDraw() {
+    ModManager::DispatchGuard frame(modManager);
     modManager.callBeforeDrawEveryTick();
 
     int ret;
@@ -767,10 +291,14 @@ void UninstallDrawHook() {
 BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
 
     switch (fdwReason) {
-    case DLL_PROCESS_ATTACH:
+    case DLL_PROCESS_ATTACH: {
         // attach to process
         // return FALSE to fail DLL load
         // install hook
+        // Hook targets and watcher code remain valid until process exit.
+        HMODULE pinned;
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCWSTR>(&__AScriptHook), &pinned);
         __AInstallHook();
 #ifdef DEBUG
         // 打开一个终端，显示std::cout结果
@@ -788,28 +316,11 @@ BOOL APIENTRY DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved) {
         }
 #endif
         break;
-
+    }
     case DLL_PROCESS_DETACH:
-        // detach from process
-        modManager.callModFinalize();
-        // uninstall hooks
-        if (hasDrawHook) {
-            UninstallDrawHook();
-            hasDrawHook = false;
-        }
-        __AUninstallHook();
-        // stop thread
-        SetEvent(hStopEvent);
-        WaitForSingleObject(hThread, 100);
-        if (hStopEvent != INVALID_HANDLE_VALUE) {
-            CloseHandle(hStopEvent);
-        }
-        if (hChangeEvent != INVALID_HANDLE_VALUE) {
-            CloseHandle(hChangeEvent);
-        }
-        if (hThread != INVALID_HANDLE_VALUE) {
-            CloseHandle(hThread);
-        }
+        // Never wait for the watcher or invoke author code under the loader lock.
+        if (monitorParams.stopEvent)
+            SetEvent(monitorParams.stopEvent);
         break;
 
     case DLL_THREAD_ATTACH:

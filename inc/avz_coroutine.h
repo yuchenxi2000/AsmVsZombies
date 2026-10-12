@@ -7,6 +7,7 @@
 
 class __ACoHandleManager : public AOrderedExitFightHook<-10> {
 public:
+    static void Clear();
     static void Add(std::coroutine_handle<> handle) {
         _handleSet.emplace(handle.address());
     }

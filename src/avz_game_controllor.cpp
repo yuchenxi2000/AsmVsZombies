@@ -99,6 +99,8 @@ void __AGameControllor::_ExitFight() {
     isSkipTick = [] {
         return false;
     };
+    if (modInfo.IamMod)
+        return; // The loader owns the game patch and releases the ending mod's requests.
     // 恢复原函数调用
     AMRef<uint16_t>(_UPDATE_ASM_ADDR_BEGIN) = _oriAsm;
     isUpdateWindow = true;

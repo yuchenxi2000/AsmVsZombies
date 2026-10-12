@@ -49,6 +49,14 @@ foreach(mod_src IN LISTS mod_srcs)
     )
 endforeach()
 
+# Loader releases use a separate version and a curated package, including documentation.
+add_custom_target(PackageAvzLoader
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+        -File "${PROJECT_SOURCE_DIR}/loader/package_release.ps1"
+    DEPENDS avz injector avzloader instloader lazy autogarden pe12 advpause
+    VERBATIM
+)
+
 # 此条命令仅用于作者打包 avz，仅编译 avz 请注释这条命令
 add_custom_target(PackageAvz ALL
     COMMAND powershell -c "\

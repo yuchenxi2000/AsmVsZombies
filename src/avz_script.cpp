@@ -1,6 +1,142 @@
 #include "libavz.h"
 #include "avz_mod.h"
 
+namespace {
+// Raised only in AvZ C++ code after a game call has returned, never through game assembly.
+struct ModWaitCancelled {};
+
+struct BlockDepthGuard {
+    int& depth;
+    bool active = true;
+    BlockDepthGuard(int& depth) : depth(depth) { ++depth; }
+    void Release() {
+        if (active) {
+            --depth;
+            active = false;
+        }
+    }
+    ~BlockDepthGuard() { Release(); }
+};
+
+struct ModRunGuard {
+    __AScriptManager& manager;
+    bool hosted;
+    ModRunGuard(__AScriptManager& manager) : manager(manager), hosted(modInfo.IamMod) {
+        if (hosted)
+            ++manager.modRunDepth;
+    }
+    ~ModRunGuard() {
+        if (hosted)
+            --manager.modRunDepth;
+    }
+};
+}
+
+__AModContext __AScriptManager::ModContext() const {
+    auto base = AGetPvzBase();
+    auto board = base->MainObject();
+    return {reinterpret_cast<uintptr_t>(board), base->GameUi(), base->LevelId(), modUser,
+        board ? board->GameClock() : 0};
+}
+
+void __AScriptManager::ManageMod(bool enabled, int user) {
+    modEnabled = enabled;
+    modUser = user;
+    modSession.Observe(ModContext());
+    MaintainMod();
+}
+
+void __AScriptManager::EndModSession() {
+    if (!modSession.active)
+        return;
+    __APublicExitFightHook::RunAll();
+    // ExitFight destroys suspended coroutines; discard their callbacks before the next session.
+    if (__aig.tickManagers) {
+        for (int mode : {ATickRunner::GLOBAL, ATickRunner::ONLY_FIGHT, ATickRunner::PAINT})
+            __aig.tickManagers[mode].Clear();
+    }
+    __aOpQueueManager.queues.clear();
+    __aOpQueueManager.isInitialized = false;
+    isLoaded = false;
+    isBlockable = true;
+    blockDepth = 0;
+    modRunFlag = -1;
+    isNeedEnterGame = isNeedBackToMain = false;
+    continueCountdown = backToMainCountdown = enterGameCountdown = -1;
+    modSession.End(static_cast<int>(scriptReloadMode), ModContext());
+}
+
+void __AScriptManager::MaintainMod() {
+    if (!modInfo.IamMod || modRunDepth != 0 || modCleanupFailed || isExit)
+        return;
+    ModRunGuard runGuard(*this);
+    try {
+        modSession.Observe(ModContext());
+        modSession.ObserveMain(ModContext());
+        if (modSession.endPending || modStopRequested || willBeExit)
+            EndModSession();
+        if (modSession.finished)
+            willBeExit = true;
+        if (modStopRequested || willBeExit) {
+            willBeExit = true;
+            if (modAfterInjectDone && !modBeforeExitDone) {
+                // Mark before invoking author code so reentry cannot repeat shutdown hooks.
+                modBeforeExitDone = true;
+                __APublicBeforeExitHook::RunAll();
+            }
+            // AfterInject callbacks may launch coroutines before AScript starts a session.
+            __aCoHandleManager.Clear();
+            __aOpQueueManager.queues.clear();
+            __aOpQueueManager.isInitialized = false;
+            if (__aig.tickManagers) {
+                for (int mode = 0; mode < ATickRunner::__COUNT; ++mode)
+                    __aig.tickManagers[mode].Clear();
+            }
+            isExit = true;
+        }
+    } catch (const std::exception& error) {
+        modCleanupFailed = true;
+        std::cerr << "Mod cleanup failed; keeping DLL loaded: " << error.what() << std::endl;
+    } catch (...) {
+        modCleanupFailed = true;
+        std::cerr << "Mod cleanup failed; keeping DLL loaded" << std::endl;
+    }
+}
+
+void __AScriptManager::CheckModWait() {
+    if (!modInfo.IamMod)
+        return;
+    modSession.Observe(ModContext());
+    if (modStopRequested || willBeExit || !modEnabled || modSession.endPending) {
+        if (modInitializing)
+            modSession.endPending = true;
+        throw ModWaitCancelled {};
+    }
+}
+
+int __AScriptManager::ModLifecycleState() const {
+    int state = modSession.active ? AMOD_SESSION : AMOD_IDLE;
+    if (modInitializing || modRunDepth != 0)
+        state |= AMOD_INITIALIZING;
+    if (modSession.waitMain)
+        state |= AMOD_WAIT_MAIN;
+    if (modSession.finished)
+        state |= AMOD_FINISHED;
+    if (isExit && modRunDepth == 0 && !modCleanupFailed)
+        state |= AMOD_STOPPED;
+    if (modCleanupFailed)
+        state |= AMOD_FAILED;
+    return state;
+}
+
+bool __AScriptManager::ModBusinessAllowed() {
+    if (!modInfo.IamMod)
+        return true;
+    modSession.Observe(ModContext());
+    return modEnabled && !modStopRequested && !willBeExit && !isExit && !modCleanupFailed
+        && !modSession.endPending && !modSession.finished && !modSession.waitMain;
+}
+
 void __AScriptManager::GlobalInit() {
     static bool isInit = false;
     if (isInit)
@@ -25,6 +161,8 @@ bool __AScriptManager::MemoryInit() {
     if (gameIdx == AAsm::CHALLENGE_ZEN_GARDEN)     // 进入禅静花园直接返回
         return false;
     auto mainObject = AGetPvzBase()->MainObject();
+    if (!mainObject)
+        return false;
 
     // 假进入战斗界面直接返回
     if (mainObject->LevelEndCountdown())
@@ -36,16 +174,31 @@ bool __AScriptManager::MemoryInit() {
 }
 
 void __AScriptManager::LoadScript() {
+    if (modInfo.IamMod && !modSession.CanBegin())
+        return;
     if (!__AScriptManager::MemoryInit())
         return;
+    if (modInfo.IamMod)
+        modSession.Begin(ModContext());
+    struct InitGuard {
+        bool& initializing;
+        InitGuard(bool& initializing) : initializing(initializing) { initializing = true; }
+        ~InitGuard() { initializing = false; }
+    } initGuard(modInitializing);
     isLoaded = true;
     __APublicBeforeScriptHook::RunAll();
+    CheckModWait();
     __aOpQueueManager.UpdateRefreshTime(); // 刷新一次
     void AScript();
     AScript();
+    CheckModWait();
     __APublicAfterScriptHook::RunAll();
+    CheckModWait();
 
     RunTotal();
+
+    if (modInfo.IamMod)
+        return; // The host observes session completion without retaining this stack for a whole fight.
 
     // 等待游戏进入战斗界面
     while (AGetPvzBase()->GameUi() == 2 && AGetPvzBase()->MainObject())
@@ -103,7 +256,8 @@ void __AScriptManager::RunScript() {
 
     auto mainObject = AGetMainObject();
 
-    static int64_t runFlag = -1;
+    static int64_t standaloneRunFlag = -1;
+    auto& runFlag = modInfo.IamMod ? modRunFlag : standaloneRunFlag;
     auto gameClock = mainObject->GameClock();
     if (runFlag == gameClock) { // 保证此函数下面的内容一帧只会运行一次
         // 但是全局运行帧依然可以运行
@@ -113,16 +267,22 @@ void __AScriptManager::RunScript() {
 
     runFlag = gameClock;
     __APublicEnterFightHook::RunAll();
+    CheckModWait();
     __aOpQueueManager.UpdateRefreshTime();
 
     isBlockable = false;
     __aOpQueueManager.RunOperation();
+    CheckModWait();
     __aig.tickManagers[ATickRunner::GLOBAL].RunQueue();
+    CheckModWait();
     __aig.tickManagers[ATickRunner::ONLY_FIGHT].RunQueue();
     isBlockable = true;
 }
 
 void __AScriptManager::RunTotal() {
+    ModRunGuard runGuard(*this);
+    if (!ModBusinessAllowed())
+        return;
     constexpr auto stopWorkingStr = " || AvZ has stopped working !!!";
     static double lastCallTime, lastFinishTime;
 
@@ -147,25 +307,38 @@ void __AScriptManager::RunTotal() {
 
         __APublicBeforeTickHook::RunAll();
         __APublicBeforeTickHook::Reset();
+        CheckModWait();
 
         static bool isRunAfterInjectHook = false;
-        if (!isRunAfterInjectHook) {
+        if (!(modInfo.IamMod ? modAfterInjectDone : isRunAfterInjectHook)) {
+            if (modInfo.IamMod)
+                modAfterInjectDone = true;
             __APublicAfterInjectHook::RunAll();
             isRunAfterInjectHook = true;
         }
+        CheckModWait();
 
         // 运行 AFTER_INJECT 运行帧
         __aig.tickManagers[ATickRunner::AFTER_INJECT].RunQueue();
+        CheckModWait();
 
         FastSaveLoad();
+        CheckModWait();
 
         if (isLoaded) // 运行脚本
             RunScript();
         else // 载入脚本
             LoadScript();
 
+        CheckModWait();
         __APublicAfterTickHook::RunAll();
         __APublicAfterTickHook::Reset();
+    } catch (const ModWaitCancelled&) {
+        isBlockable = true;
+        // A suspended synchronous initializer cannot resume after being filtered out.
+        // End it at the outer boundary; do not destroy queues on a reentrant tick.
+        if (modInitializing)
+            modSession.endPending = true;
     } catch (AException& exce) {
         std::string exceMsg = exce.what();
         if (exceMsg != ASTR_GAME_RET_MAIN_UI) {
@@ -173,11 +346,15 @@ void __AScriptManager::RunTotal() {
             exceMsg = "catch avz exception: " + exceMsg + stopWorkingStr;
             aLogger->Info(exceMsg.c_str());
         } else {
-            // 当递归深度为 0 和 scriptReloadMode > 0 时, 才能重置 isLoaded
-            isLoaded = !(int(scriptReloadMode) > 0 && blockDepth == 0);
-            willBeExit = isLoaded;
-            aLogger->Info(exceMsg.c_str());
-            __APublicExitFightHook::RunAll();
+            if (modInfo.IamMod) {
+                modSession.endPending = true;
+            } else {
+                // 当递归深度为 0 和 scriptReloadMode > 0 时, 才能重置 isLoaded
+                isLoaded = !(int(scriptReloadMode) > 0 && blockDepth == 0);
+                willBeExit = isLoaded;
+                aLogger->Info(exceMsg.c_str());
+                __APublicExitFightHook::RunAll();
+            }
         }
     } catch (std::exception& exce) {
         AMsgBox::Show(std::string("catch std exception: ") + exce.what() + stopWorkingStr);
@@ -214,8 +391,8 @@ void __AScriptManager::ScriptHook() {
     }
 }
 
-// TODO: avzloader尚未支持
 void __AScriptManager::WaitForFight(bool isSkipTick) {
+    CheckModWait();
     if (AGetPvzBase()->GameUi() == 3)
         return;
     if (!isBlockable) {
@@ -227,11 +404,12 @@ void __AScriptManager::WaitForFight(bool isSkipTick) {
         aLogger->Error("请等待上一个阻塞函数时间到达之后再调用 WaitForFight");
         return;
     }
-    ++blockDepth;
+    BlockDepthGuard blockGuard(blockDepth);
 
     for (int cnt = 0; AGetPvzBase()->GameUi() == 2 && cnt < 2; ++cnt) {
         // 画面刷新几帧防止被系统杀死
         AAsm::GameSleepLoop();
+        CheckModWait();
     }
     if (isSkipTick) {
         for (; AGetPvzBase()->GameUi() == 2;) {
@@ -240,13 +418,17 @@ void __AScriptManager::WaitForFight(bool isSkipTick) {
             } else {
                 RunTotal();
             }
+            CheckModWait();
             AAsm::UpdateFrame();
+            CheckModWait();
         }
     }
-    for (; AGetPvzBase()->GameUi() == 2;)
+    for (; AGetPvzBase()->GameUi() == 2;) {
         AAsm::GameSleepLoop();
+        CheckModWait();
+    }
 
-    --blockDepth;
+    blockGuard.Release();
     if (!AGetPvzBase()->MainObject())
         AExitFight();
     __aOpQueueManager.UpdateRefreshTime(); // 刷新一次
@@ -274,16 +456,16 @@ void __AScriptManager::WaitUntil(int wave, int time) {
     }
     if (nowTime == time)
         return;
-    ++blockDepth;
+    BlockDepthGuard blockGuard(blockDepth);
     while (ANowTime(wave) < time) {
         AAsm::GameSleepLoop();
+        CheckModWait();
         if (!AGetPvzBase()->MainObject()) {
-            --blockDepth;
+            blockGuard.Release();
             AExitFight();
         }
         __aOpQueueManager.UpdateRefreshTime(); // 实时刷新当前时间
     }
-    --blockDepth;
 }
 
 void __AScriptManager::FastSaveLoad() {

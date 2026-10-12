@@ -3,6 +3,7 @@
 
 #include <windows.h>
 #include <iostream>
+#include "avz_mod_lifecycle.h"
 
 typedef void (__cdecl *FuncRegisterType)(HMODULE);
 typedef void (__cdecl *FuncSetStateType)(int);
@@ -55,7 +56,7 @@ public:
     }
 
     bool InitAsMod(HMODULE hMod) {
-        IamMod = true;
+        this->hMod = hMod;
         hLoader = GetModuleHandleW(L"avzloader.dll");
         if (!hLoader) {
             std::cerr << "Failed to find avzloader.dll!" << std::endl;
@@ -65,6 +66,7 @@ public:
             std::cout << "Failed to register loader API!" << std::endl;
             return false;
         }
+        IamMod = true;
         // register me!
         registerFunc(hMod);
         return true;
@@ -93,5 +95,10 @@ extern "C" __declspec(dllexport) int __cdecl BlockTimeArrived();
 extern "C" __declspec(dllexport) void __cdecl BeforeDrawEveryTick();
 extern "C" __declspec(dllexport) void __cdecl DrawEveryTick();
 extern "C" __declspec(dllexport) void __cdecl AfterDrawEveryTick();
+
+// Internal protocol: maintained even while configuration suppresses business ticks.
+extern "C" __declspec(dllexport) void __cdecl ModManage(int enabled, int user);
+extern "C" __declspec(dllexport) void __cdecl ModRequestStop();
+extern "C" __declspec(dllexport) int __cdecl ModGetLifecycleState();
 
 #endif

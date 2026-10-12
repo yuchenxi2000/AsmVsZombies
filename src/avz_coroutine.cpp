@@ -3,10 +3,17 @@
 std::unordered_set<void*> __ACoHandleManager::_handleSet;
 
 void __ACoHandleManager::_ExitFight() {
-    // 唤醒所有协程
-    for (auto&& handle : _handleSet)
+    Clear();
+}
+
+void __ACoHandleManager::Clear() {
+    // Remove first: coroutine destructors may also update the handle registry.
+    while (!_handleSet.empty()) {
+        auto iterator = _handleSet.begin();
+        void* handle = *iterator;
+        _handleSet.erase(iterator);
         std::coroutine_handle<>::from_address(handle).destroy();
-    _handleSet.clear();
+    }
 }
 
 bool __AWait::await_ready() const {

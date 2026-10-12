@@ -77,6 +77,8 @@ void __AOpQueueManager::RunOperation() {
         if (opQueue.calRefreshTime == __AOperationQueue::UNINIT) // 本波还未到达
             continue;
         for (auto iter = opQueue.queue.begin(); iter != opQueue.queue.end(); iter = opQueue.queue.erase(iter)) {
+            if (!__aScriptManager.ModBusinessAllowed())
+                return;
             int queueNowTime = nowTime - opQueue.calRefreshTime;
             if (iter->first > queueNowTime) // 时间未到达
                 break;

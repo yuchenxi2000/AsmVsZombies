@@ -4,6 +4,8 @@
 
 本仓库是支持同时加载多个脚本的非官方版本，原仓库README在本节后面。
 
+当前加载器版本为 **AvZLoader 2.0.0**，基于 **AvZ 2.9.2**。加载器的更新记录见 [CHANGELOG_LOADER.md](CHANGELOG_LOADER.md)，上游主库的更新记录仍见 [CHANGELOG.md](CHANGELOG.md)。
+
 `loader`目录下实现了一个“模组”加载器，只需要把编译成动态库的AvZ脚本放在PvZ游戏所在目录的`mods`文件夹下，启动游戏时即可自动加载脚本。
 
 AvZLoader能够：
@@ -24,15 +26,11 @@ AvZLoader能够：
 
 ## 使用方式
 
-> 仓库里的版本支持涉及__AGameControllor的高级暂停、跳帧等功能
->
-> release里版本明确不支持高级暂停、跳帧等功能，如果某个脚本使用这些功能可能会出问题，比如一个脚本跳帧/高级暂停时其他不运行
+1. 下载[release](https://github.com/yuchenxi2000/AsmVsZombies/releases)
 
-1. 下载release里的版本[2.9.0_loader](https://github.com/yuchenxi2000/AsmVsZombies/releases)
+2. 安装AvZLoader：把`bin`目录下的`avzloader.dll`和`instloader.exe`拷贝到PvZ游戏所在目录下（要有`PlantsVsZombies.exe`），运行`instloader.exe`，它生成一个`PlantsVsZombies_modded.exe`
 
-2. 安装AvZLoader：把`bin`目录下的`avzloader.dll`和`avzinstaller.exe`拷贝到PvZ游戏所在目录下（要有`PlantsVsZombies.exe`），运行`avzinstaller.exe`，它生成一个`PlantsVsZombies_modded.exe`
-
-3. 打开`PlantsVsZombies_modded.exe`。运行脚本有两种方式：1、在PvZ游戏所在目录新建一个`mods`文件夹，把dll放在`mods`文件夹下（要改名字，因为不能加载同名的dll）；2、同时你可以用`injector.exe`注入（比如用VS Code的AvZ插件），但注入的mod只能用`injector.exe`卸载。
+3. 打开`PlantsVsZombies_modded.exe`。运行脚本有两种方式：1、在PvZ游戏所在目录新建一个`mods`文件夹，把dll放在`mods`文件夹下（要改名字，因为不能加载同名的dll）；2、同时你可以用`injector.exe`注入（比如用VS Code的AvZ插件），但注入的mod无法卸载，只能用`injector.exe`替换为另一个mod。
 
 4. release里的`bin`目录下有几个示例mod，可以直接放`mods`目录里面。如果要用`pe12.dll`，最好把`pe12.toml`（在`mod`目录下）也拷贝到`mods`目录，它能限制脚本只在生存无尽运行。
 
@@ -54,6 +52,10 @@ include = "666"
 include = 13
 ```
 如果有一个脚本叫`script.dll`，那么对应的配置文件为`script.toml`，放到`mods`目录下。
+
+## 加载器文档
+
+模组配置、模组 API、生命周期管理和开发验证的详细说明见 [tutorial/avzloader](tutorial/avzloader/README.md)。
 
 ---
 

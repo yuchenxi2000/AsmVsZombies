@@ -3,6 +3,7 @@
 
 #include "avz_asm.h"
 #include "avz_state_hook.h"
+#include "avz_mod_lifecycle.h"
 
 class __AProfiler : public AOrderedEnterFightHook<-32768> {
 protected:
@@ -41,6 +42,26 @@ public:
     AReloadMode scriptReloadMode = AReloadMode::NONE;
     int blockDepth = 0;
     ATime blockTime;
+
+    // Used only when hosted by AvZLoader; standalone injection retains its loop.
+    __AModSession modSession;
+    bool modEnabled = true;
+    bool modStopRequested = false;
+    bool modCleanupFailed = false;
+    bool modAfterInjectDone = false;
+    bool modBeforeExitDone = false;
+    bool modInitializing = false;
+    int modRunDepth = 0;
+    int modUser = 0;
+    int64_t modRunFlag = -1;
+
+    __AModContext ModContext() const;
+    void ManageMod(bool enabled, int user);
+    void MaintainMod();
+    void EndModSession();
+    void CheckModWait();
+    int ModLifecycleState() const;
+    bool ModBusinessAllowed();
 
     // 用于 EnterGame
     bool isNeedEnterGame = false;

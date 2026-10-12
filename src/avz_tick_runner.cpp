@@ -3,9 +3,12 @@
 void __ATickManager::RunQueue() {
     for (auto&& pool : _priQue) {
         // 不用这种遍历如果中途新增了元素可能会访问非法内存
-        for (std::size_t idx = 0; idx < pool.Size(); ++idx)
+        for (std::size_t idx = 0; idx < pool.Size(); ++idx) {
+            if (!__aScriptManager.ModBusinessAllowed())
+                return;
             if (pool.IsAlive(idx) && pool[idx].isRunning)
                 pool[idx].operation();
+        }
     }
 }
 
@@ -59,7 +62,7 @@ ATickHandle& ATickHandle::operator=(const ATickHandle& rhs) {
 }
 
 bool ATickHandle::IsStopped() const noexcept {
-    if (_isStopped)
+    if (_isStopped || __aig.tickManagers == nullptr)
         return true;
     return !__aig.tickManagers[_runMode].IsAlive(_priority, _idx, _id);
 }

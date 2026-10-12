@@ -205,6 +205,8 @@ void __ABasicPainter::UpdatePaintTime() {
 }
 
 void __ABasicPainter::DrawEveryTick() {
+    if (__aig.tickManagers == nullptr)
+        return; // A freshly loaded DLL may receive a draw before its first logic tick.
     if (AGetMainObject() == nullptr) {
         return;
     }
@@ -249,11 +251,11 @@ void __ABasicPainter::_BeforeScript() {
 }
 
 void __ABasicPainter::_ExitFight() {
+    singleTickQueue.clear();
+    multiTickQueue.clear();
     if (!IsOpen3dAcceleration())
         return;
     ClearFont();
-    singleTickQueue.clear();
-    multiTickQueue.clear();
     if (!modInfo.IamMod) {
         // UninstallDrawHook
         *(uint16_t*)0x54C8CD = 0xD0FF;

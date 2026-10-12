@@ -1,6 +1,6 @@
 #include "libavz.h"
 
-#define __ADefineHookClassFuncs(HookName)                                                    \
+#define __ADefineHookClassFuncs(HookName, BusinessHook)                                      \
     __APublic##HookName##Hook::__APublic##HookName##Hook(int runOrder)                       \
     {                                                                                        \
         __ARegisterInitOp([this] {                                                           \
@@ -31,6 +31,8 @@
     {                                                                                        \
         if (!_isRunAll) {                                                                    \
             for (auto&& hook : _GetHookContainer()) {                                        \
+                if (BusinessHook && !__aScriptManager.ModBusinessAllowed())                  \
+                    return;                                                                  \
                 hook.second->Run##HookName();                                                \
             }                                                                                \
             _isRunAll = true;                                                                \
@@ -43,11 +45,12 @@
     }                                                                                        \
     bool __APublic##HookName##Hook::_isRunAll = false
 
-__ADefineHookClassFuncs(BeforeScript);
-__ADefineHookClassFuncs(AfterScript);
-__ADefineHookClassFuncs(EnterFight);
-__ADefineHookClassFuncs(ExitFight);
-__ADefineHookClassFuncs(AfterInject);
-__ADefineHookClassFuncs(BeforeTick);
-__ADefineHookClassFuncs(AfterTick);
-__ADefineHookClassFuncs(BeforeExit);
+__ADefineHookClassFuncs(BeforeScript, true);
+__ADefineHookClassFuncs(AfterScript, true);
+__ADefineHookClassFuncs(EnterFight, true);
+__ADefineHookClassFuncs(ExitFight, false);
+// Injection and shutdown hooks complete their once-per-DLL work as a group.
+__ADefineHookClassFuncs(AfterInject, false);
+__ADefineHookClassFuncs(BeforeTick, true);
+__ADefineHookClassFuncs(AfterTick, true);
+__ADefineHookClassFuncs(BeforeExit, false);
